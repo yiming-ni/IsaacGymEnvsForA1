@@ -1,0 +1,6 @@
+gym
+torch
+omegaconf
+termcolor
+hydra-core>=1.1
+rl-games==1.1.4
