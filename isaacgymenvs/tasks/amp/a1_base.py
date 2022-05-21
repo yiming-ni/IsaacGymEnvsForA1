@@ -107,10 +107,10 @@ class A1Base(VecTask):
         self._dof_vel = self._dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
 
         self._initial_dof_pos = torch.zeros_like(self._dof_pos, device=self.device, dtype=torch.float)
-        right_shoulder_x_handle = self.gym.find_actor_dof_handle(self.envs[0], self.humanoid_handles[0], "right_shoulder_x")
-        left_shoulder_x_handle = self.gym.find_actor_dof_handle(self.envs[0], self.humanoid_handles[0], "left_shoulder_x")
-        self._initial_dof_pos[:, right_shoulder_x_handle] = 0.5 * np.pi
-        self._initial_dof_pos[:, left_shoulder_x_handle] = -0.5 * np.pi
+        # right_shoulder_x_handle = self.gym.find_actor_dof_handle(self.envs[0], self.humanoid_handles[0], "right_shoulder_x")
+        # left_shoulder_x_handle = self.gym.find_actor_dof_handle(self.envs[0], self.humanoid_handles[0], "left_shoulder_x")
+        # self._initial_dof_pos[:, right_shoulder_x_handle] = 0.5 * np.pi
+        # self._initial_dof_pos[:, left_shoulder_x_handle] = -0.5 * np.pi
 
         self._initial_dof_vel = torch.zeros_like(self._dof_vel, device=self.device, dtype=torch.float)
         
@@ -205,9 +205,9 @@ class A1Base(VecTask):
         asset_options.thickness = self.cfg["asset"]["thickness"]
         asset_options.disable_gravity = self.cfg["asset"]["disable_gravity"]
         
-        import ipdb
+        # import ipdb
         humanoid_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
-        ipdb.set_trace()
+        # ipdb.set_trace()
 
         actuator_props = self.gym.get_asset_actuator_properties(humanoid_asset)
         motor_efforts = [prop.motor_effort for prop in actuator_props]
@@ -271,7 +271,7 @@ class A1Base(VecTask):
         for i in range(self.num_envs):
             # create env instance
             env_ptr = self.gym.create_env(
-                self.sim, lower, upper, num_per_row
+                self.sim, lower, upper, int(num_per_row)
             )
 
             pos = self.env_origins[i].clone()
@@ -279,9 +279,9 @@ class A1Base(VecTask):
             start_pose.p = gymapi.Vec3(*pos)
 
             contact_filter = 1
-            ipdb.set_trace()
+            # ipdb.set_trace()
             handle = self.gym.create_actor(env_ptr, humanoid_asset, start_pose, "a1", i, contact_filter, 0)
-            ipdb.set_trace()
+            # ipdb.set_trace()
 
             self.gym.enable_actor_dof_force_sensors(env_ptr, handle)
 
