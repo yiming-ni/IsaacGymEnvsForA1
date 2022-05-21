@@ -23,7 +23,7 @@ task:
     enableEarlyTermination: true
     motion_file: amp_humanoid_walk.npy
     asset:
-      assetFileName: mjcf/a1.xml
+      assetFileName: urdf/a1_original.urdf
     plane:
       staticFriction: 1.0
       dynamicFriction: 1.0

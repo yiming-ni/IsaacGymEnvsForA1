@@ -180,7 +180,7 @@ class A1Base(VecTask):
         upper = gymapi.Vec3(0., 0., 0.)
 
         asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../../assets')
-        asset_file = "urdf/a1.urdf"
+        asset_file = "urdf/a1_original.urdf"
         
         if "asset" in self.cfg["env"]:
             #asset_root = self.cfg["env"]["asset"].get("assetRoot", asset_root)
@@ -205,13 +205,14 @@ class A1Base(VecTask):
         asset_options.thickness = self.cfg["asset"]["thickness"]
         asset_options.disable_gravity = self.cfg["asset"]["disable_gravity"]
         
-        # import ipdb
+        import ipdb
         humanoid_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
-        # ipdb.set_trace()
 
-        actuator_props = self.gym.get_asset_actuator_properties(humanoid_asset)
-        motor_efforts = [prop.motor_effort for prop in actuator_props]
-        
+        # actuator_props = self.gym.get_asset_actuator_properties(humanoid_asset)
+        # motor_efforts = [prop.motor_effort for prop in actuator_props]
+        dof_props = self.gym.get_asset_dof_properties(humanoid_asset)
+        motor_efforts = [p.item() for p in dof_props["effort"]]
+        ipdb.set_trace()
         
 
         # create force sensors at the feet
@@ -271,7 +272,7 @@ class A1Base(VecTask):
         for i in range(self.num_envs):
             # create env instance
             env_ptr = self.gym.create_env(
-                self.sim, lower, upper, int(num_per_row)
+                self.sim, lower, upper, num_per_row
             )
 
             pos = self.env_origins[i].clone()
