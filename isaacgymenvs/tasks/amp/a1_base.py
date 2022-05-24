@@ -40,7 +40,7 @@ from ..base.vec_task import VecTask
 
 DOF_BODY_IDS = [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15]
 DOF_OFFSETS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-NUM_OBS = 1 + 6 + 3 + 3 + 12 + 12 + 12# [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
+NUM_OBS = 1 + 6 + 3 + 3 + 12 + 12 + 12  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
 # base_height, base_orientation=4, base_angular_vel=3, joint_pos=12, joint_velocity=12
 # orientation, joint_pos, 4+12+history
 NUM_ACTIONS = 12
@@ -52,13 +52,13 @@ NUM_ACTIONS = 12
 #    actual joint pos, actual joint vel = update_data
 # update obs
 
-import ipdb
 KEY_BODY_NAMES = ["FR_foot", "FL_foot", "RR_foot", "RL_foot"]
+
 
 class A1Base(VecTask):
 
     def __init__(self, config, sim_device, graphics_device_id, headless):
-        
+
         self.cfg = config
 
         self._pd_control = self.cfg["env"]["pdControl"]
@@ -80,14 +80,15 @@ class A1Base(VecTask):
         self.cfg["env"]["numObservations"] = self.get_obs_size()
         self.cfg["env"]["numActions"] = self.get_action_size()
 
-        super().__init__(config=self.cfg, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless)
+        super().__init__(config=self.cfg, sim_device=sim_device, graphics_device_id=graphics_device_id,
+                         headless=headless)
 
         # self.device_type, self.device_id = gymutil.parse_device_str(self.sim_device)
         # self.graphics_device_id = self.device_id if self.headless == False else -1
-        
+
         dt = self.cfg["sim"]["dt"]
         self.dt = self.control_freq_inv * dt
-        
+
         # get gym GPU state tensors
         actor_root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
         dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
@@ -122,19 +123,19 @@ class A1Base(VecTask):
         # self._initial_dof_pos[:, left_shoulder_x_handle] = -0.5 * np.pi
 
         self._initial_dof_vel = torch.zeros_like(self._dof_vel, device=self.device, dtype=torch.float)
-        
+
         self._rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)
         self._rigid_body_pos = self._rigid_body_state.view(self.num_envs, self.num_bodies, 13)[..., 0:3]
         self._rigid_body_rot = self._rigid_body_state.view(self.num_envs, self.num_bodies, 13)[..., 3:7]
         self._rigid_body_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies, 13)[..., 7:10]
         self._rigid_body_ang_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies, 13)[..., 10:13]
         self._contact_forces = gymtorch.wrap_tensor(contact_force_tensor).view(self.num_envs, self.num_bodies, 3)
-        
+
         self._terminate_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
-        
+
         if self.viewer != None:
             self._init_camera()
-            
+
         return
 
     def get_obs_size(self):
@@ -144,7 +145,7 @@ class A1Base(VecTask):
         return NUM_ACTIONS
 
     def create_sim(self):
-        self.up_axis_idx = 2 # index of up axis: Y=1, Z=2
+        self.up_axis_idx = 2  # index of up axis: Y=1, Z=2
         self.sim = super().create_sim(self.device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
 
         self._create_ground_plane()
@@ -164,7 +165,8 @@ class A1Base(VecTask):
            returns: [numpy.array]: modified DOF properties
         """
         if env_id == 0:
-            self.dof_pos_limits = torch.zeros(self.num_dof, 2, dtype=torch.float, device=self.device, requires_grad=False)
+            self.dof_pos_limits = torch.zeros(self.num_dof, 2, dtype=torch.float, device=self.device,
+                                              requires_grad=False)
             self.dof_vel_limits = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
             self.torque_limits = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
             for i in range(len(props)):
@@ -175,12 +177,17 @@ class A1Base(VecTask):
                 props["friction"][i] = 0.2
                 m = (self.dof_pos_limits[i, 0] + self.dof_pos_limits[i, 1]) / 2
                 r = self.dof_pos_limits[i, 1] - self.dof_pos_limits[i, 0]
-                
-                self.dof_pos_limits[i, 0] = m - 0.5 * r * self.cfg["task"]["randomization_params"]["actor_params"]["a1"]["dof_properties"]["soft_dof_pos_limit"]
-                self.dof_pos_limits[i, 1] = m + 0.5 * r * self.cfg["task"]["randomization_params"]["actor_params"]["a1"]["dof_properties"]["soft_dof_pos_limit"]
-                self.torque_limits[i] *= self.cfg["task"]["randomization_params"]["actor_params"]["a1"]["dof_properties"]["soft_dof_torque_limit"]
-        return props
 
+                self.dof_pos_limits[i, 0] = m - 0.5 * r * \
+                                            self.cfg["task"]["randomization_params"]["actor_params"]["a1"][
+                                                "dof_properties"]["soft_dof_pos_limit"]
+                self.dof_pos_limits[i, 1] = m + 0.5 * r * \
+                                            self.cfg["task"]["randomization_params"]["actor_params"]["a1"][
+                                                "dof_properties"]["soft_dof_pos_limit"]
+                self.torque_limits[i] *= \
+                self.cfg["task"]["randomization_params"]["actor_params"]["a1"]["dof_properties"][
+                    "soft_dof_torque_limit"]
+        return props
 
     def reset_idx(self, env_ids):
         self._reset_actors(env_ids)
@@ -209,23 +216,19 @@ class A1Base(VecTask):
         return
 
     def _create_envs(self, num_envs, spacing, num_per_row):
-        # lower = gymapi.Vec3(-spacing, -spacing, 0.0)
-        # upper = gymapi.Vec3(spacing, spacing, spacing)
-        lower = gymapi.Vec3(0., 0., 0.)
-        upper = gymapi.Vec3(0., 0., 0.)
+        lower = gymapi.Vec3(-spacing, -spacing, 0.0)
+        upper = gymapi.Vec3(spacing, spacing, spacing)
+        # lower = gymapi.Vec3(0., 0., 0.)
+        # upper = gymapi.Vec3(0., 0., 0.)
 
         asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../../assets')
         asset_file = "urdf/a1_original.urdf"
-        
+
         if "asset" in self.cfg["env"]:
-            #asset_root = self.cfg["env"]["asset"].get("assetRoot", asset_root)
+            # asset_root = self.cfg["env"]["asset"].get("assetRoot", asset_root)
             asset_file = self.cfg["env"]["asset"].get("assetFileName", asset_file)
 
         asset_options = gymapi.AssetOptions()
-        # asset_options.angular_damping = 0.01
-        # asset_options.max_angular_velocity = 100.0
-        # asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
-        # TODO: above are original for humanoid
 
         asset_options.default_dof_drive_mode = self.cfg["asset"]["default_dof_drive_mode"]
         asset_options.collapse_fixed_joints = self.cfg["asset"]["collapse_fixed_joints"]
@@ -240,14 +243,13 @@ class A1Base(VecTask):
         asset_options.armature = self.cfg["asset"]["armature"]
         asset_options.thickness = self.cfg["asset"]["thickness"]
         asset_options.disable_gravity = self.cfg["asset"]["disable_gravity"]
-        
+
         a1_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
 
         # actuator_props = self.gym.get_asset_actuator_properties(a1_asset)
         # motor_efforts = [prop.motor_effort for prop in actuator_props]
         dof_props_asset = self.gym.get_asset_dof_properties(a1_asset)
         motor_efforts = [p.item() for p in dof_props_asset["effort"]]
-        
 
         # create force sensors at the feet
         rr_calf_idx = self.gym.find_asset_rigid_body_index(a1_asset, "RR_calf")
@@ -266,11 +268,13 @@ class A1Base(VecTask):
 
         self.torso_index = 0
         self.body_dict = self.gym.get_asset_rigid_body_names(a1_asset)
+        # ['base', 'FL_hip', 'FL_thigh', 'FL_calf', 'FL_foot', 'FR_hip', 'FR_thigh', 'FR_calf', 'FR_foot',
+        # 'RL_hip', 'RL_thigh', 'RL_calf', 'RL_foot', 'RR_hip', 'RR_thigh', 'RR_calf', 'RR_foot']
         self.num_bodies = self.gym.get_asset_rigid_body_count(a1_asset)
         self.num_dof = self.gym.get_asset_dof_count(a1_asset)
         self.num_joints = self.gym.get_asset_joint_count(a1_asset)
 
-        # Below is for humanoid
+        # Below for humanoid
         # start_pose = gymapi.Transform()
         # start_pose.p = gymapi.Vec3(*get_axis_params(0.89, self.up_axis_idx))
         # start_pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
@@ -286,7 +290,7 @@ class A1Base(VecTask):
 
         # self.get_env_origins()
         self.env_origins = torch.zeros(self.num_envs, 3, device=self.device, requires_grad=False)
-            # create a grid of robots
+        # create a grid of robots
         num_cols = np.floor(np.sqrt(self.num_envs))
         num_rows = np.ceil(self.num_envs / num_cols)
         xx, yy = torch.meshgrid(torch.arange(num_rows), torch.arange(num_cols))
@@ -295,15 +299,14 @@ class A1Base(VecTask):
         self.env_origins[:, 1] = spacing * yy.flatten()[:self.num_envs]
         self.env_origins[:, 2] = 0.
 
-
-        self.start_rotation = torch.tensor([start_pose.r.x, start_pose.r.y, start_pose.r.z, start_pose.r.w], device=self.device)
+        self.start_rotation = torch.tensor([start_pose.r.x, start_pose.r.y, start_pose.r.z, start_pose.r.w],
+                                           device=self.device)
 
         self.a1_handles = []
         self.envs = []
         self.dof_limits_lower = []
         self.dof_limits_upper = []
 
-        
         for i in range(self.num_envs):
             # create env instance
             env_ptr = self.gym.create_env(
@@ -311,7 +314,7 @@ class A1Base(VecTask):
             )
 
             pos = self.env_origins[i].clone()
-            pos[:2] += torch_rand_float(-1., 1., (2,1), device=self.device).squeeze(1)
+            pos[:2] += torch_rand_float(-1., 1., (2, 1), device=self.device).squeeze(1)
             start_pose.p = gymapi.Vec3(*pos)
 
             contact_filter = 1
@@ -348,7 +351,7 @@ class A1Base(VecTask):
 
         self._key_body_ids = self._build_key_body_ids_tensor(env_ptr, handle)
         self._contact_body_ids = self._build_contact_body_ids_tensor(env_ptr, handle)
-        
+
         if (self._pd_control):
             self._build_pd_action_offset_scale()
 
@@ -356,7 +359,7 @@ class A1Base(VecTask):
 
     def _build_pd_action_offset_scale(self):
         num_joints = len(DOF_OFFSETS) - 1
-        
+
         lim_low = self.dof_limits_lower.cpu().numpy()
         lim_high = self.dof_limits_upper.cpu().numpy()
 
@@ -372,7 +375,7 @@ class A1Base(VecTask):
                 curr_low = lim_low[dof_offset]
                 curr_high = lim_high[dof_offset]
                 curr_mid = 0.5 * (curr_high + curr_low)
-                
+
                 # extend the action range to be a bit beyond the joint limits so that the motors
                 # don't lose their strength as they approach the joint limits
                 curr_scale = 0.7 * (curr_high - curr_low)
@@ -380,7 +383,7 @@ class A1Base(VecTask):
                 curr_high = curr_mid + curr_scale
 
                 lim_low[dof_offset] = curr_low
-                lim_high[dof_offset] =  curr_high
+                lim_high[dof_offset] = curr_high
 
         self._pd_action_offset = 0.5 * (lim_high + lim_low)
         self._pd_action_scale = 0.5 * (lim_high - lim_low)
@@ -395,9 +398,10 @@ class A1Base(VecTask):
 
     def _compute_reset(self):
         self.reset_buf[:], self._terminate_buf[:] = compute_a1_reset(self.reset_buf, self.progress_buf,
-                                                   self._contact_forces, self._contact_body_ids,
-                                                   self._rigid_body_pos, self.max_episode_length,
-                                                   self._enable_early_termination, self._termination_height)
+                                                                     self._contact_forces, self._contact_body_ids,
+                                                                     self._rigid_body_pos, self.max_episode_length,
+                                                                     self._enable_early_termination,
+                                                                     self._termination_height)
         return
 
     def _refresh_sim_tensors(self):
@@ -431,9 +435,9 @@ class A1Base(VecTask):
             dof_pos = self._dof_pos[env_ids]
             dof_vel = self._dof_vel[env_ids]
             key_body_pos = self._rigid_body_pos[env_ids][:, self._key_body_ids, :]
-        
+
         obs = compute_a1_observations(root_states, dof_pos, dof_vel,
-                                            key_body_pos, self._local_root_obs)
+                                      key_body_pos, self._local_root_obs)
 
         return obs
 
@@ -476,7 +480,7 @@ class A1Base(VecTask):
         self._compute_observations()
         self._compute_reward(self.actions)
         self._compute_reset()
-        
+
         self.extras["terminate"] = self._terminate_buf
 
         # debug viz
@@ -496,7 +500,7 @@ class A1Base(VecTask):
         body_ids = []
         for body_name in KEY_BODY_NAMES:
             body_id = self.gym.find_actor_rigid_body_handle(env_ptr, actor_handle, body_name)
-            assert(body_id != -1)
+            assert (body_id != -1)
             body_ids.append(body_id)
 
         body_ids = to_torch(body_ids, device=self.device, dtype=torch.long)
@@ -506,7 +510,7 @@ class A1Base(VecTask):
         body_ids = []
         for body_name in self._contact_bodies:
             body_id = self.gym.find_actor_rigid_body_handle(env_ptr, actor_handle, body_name)
-            assert(body_id != -1)
+            assert (body_id != -1)
             body_ids.append(body_id)
 
         body_ids = to_torch(body_ids, device=self.device, dtype=torch.long)
@@ -525,9 +529,9 @@ class A1Base(VecTask):
     def _init_camera(self):
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self._cam_prev_char_pos = self._root_states[0, 0:3].cpu().numpy()
-        
-        cam_pos = gymapi.Vec3(self._cam_prev_char_pos[0], 
-                              self._cam_prev_char_pos[1] - 3.0, 
+
+        cam_pos = gymapi.Vec3(self._cam_prev_char_pos[0],
+                              self._cam_prev_char_pos[1] - 3.0,
                               1.0)
         cam_target = gymapi.Vec3(self._cam_prev_char_pos[0],
                                  self._cam_prev_char_pos[1],
@@ -538,14 +542,14 @@ class A1Base(VecTask):
     def _update_camera(self):
         self.gym.refresh_actor_root_state_tensor(self.sim)
         char_root_pos = self._root_states[0, 0:3].cpu().numpy()
-        
+
         cam_trans = self.gym.get_viewer_camera_transform(self.viewer, None)
         cam_pos = np.array([cam_trans.p.x, cam_trans.p.y, cam_trans.p.z])
         cam_delta = cam_pos - self._cam_prev_char_pos
 
         new_cam_target = gymapi.Vec3(char_root_pos[0], char_root_pos[1], 1.0)
-        new_cam_pos = gymapi.Vec3(char_root_pos[0] + cam_delta[0], 
-                                  char_root_pos[1] + cam_delta[1], 
+        new_cam_pos = gymapi.Vec3(char_root_pos[0] + cam_delta[0],
+                                  char_root_pos[1] + cam_delta[1],
                                   cam_pos[2])
 
         self.gym.viewer_camera_look_at(self.viewer, None, new_cam_pos, new_cam_target)
@@ -556,6 +560,7 @@ class A1Base(VecTask):
     def _update_debug_viz(self):
         self.gym.clear_lines(self.viewer)
         return
+
 
 #####################################################################
 ###=========================jit functions=========================###
@@ -591,6 +596,7 @@ def dof_to_obs(pose):
 
     return dof_obs
 
+
 @torch.jit.script
 def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_root_obs):
     # type: (Tensor, Tensor, Tensor, Tensor, bool) -> Tensor
@@ -613,19 +619,23 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
 
     root_pos_expand = root_pos.unsqueeze(-2)
     local_key_body_pos = key_body_pos - root_pos_expand
-    
+
     heading_rot_expand = heading_rot.unsqueeze(-2)
     heading_rot_expand = heading_rot_expand.repeat((1, local_key_body_pos.shape[1], 1))
-    flat_end_pos = local_key_body_pos.view(local_key_body_pos.shape[0] * local_key_body_pos.shape[1], local_key_body_pos.shape[2])
-    flat_heading_rot = heading_rot_expand.view(heading_rot_expand.shape[0] * heading_rot_expand.shape[1], 
+    flat_end_pos = local_key_body_pos.view(local_key_body_pos.shape[0] * local_key_body_pos.shape[1],
+                                           local_key_body_pos.shape[2])
+    flat_heading_rot = heading_rot_expand.view(heading_rot_expand.shape[0] * heading_rot_expand.shape[1],
                                                heading_rot_expand.shape[2])
     local_end_pos = my_quat_rotate(flat_heading_rot, flat_end_pos)
-    flat_local_key_pos = local_end_pos.view(local_key_body_pos.shape[0], local_key_body_pos.shape[1] * local_key_body_pos.shape[2])
+    flat_local_key_pos = local_end_pos.view(local_key_body_pos.shape[0],
+                                            local_key_body_pos.shape[1] * local_key_body_pos.shape[2])
 
     dof_obs = dof_to_obs(dof_pos)
 
-    obs = torch.cat((root_h, root_rot_obs, local_root_vel, local_root_ang_vel, dof_obs, dof_vel, flat_local_key_pos), dim=-1)
+    obs = torch.cat((root_h, root_rot_obs, local_root_vel, local_root_ang_vel, dof_obs, dof_vel, flat_local_key_pos),
+                    dim=-1)
     return obs
+
 
 @torch.jit.script
 def compute_a1_reward(obs_buf):
@@ -633,9 +643,10 @@ def compute_a1_reward(obs_buf):
     reward = torch.ones_like(obs_buf[:, 0])
     return reward
 
+
 @torch.jit.script
 def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
-                           max_episode_length, enable_early_termination, termination_height):
+                     max_episode_length, enable_early_termination, termination_height):
     # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float) -> Tuple[Tensor, Tensor]
     terminated = torch.zeros_like(reset_buf)
 
@@ -656,7 +667,7 @@ def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rig
         # so only check after first couple of steps
         has_fallen *= (progress_buf > 1)
         terminated = torch.where(has_fallen, torch.ones_like(reset_buf), terminated)
-    
+
     reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), terminated)
 
     return reset, terminated

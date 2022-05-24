@@ -468,8 +468,8 @@ class CommonAgent(a2c_continuous.A2CAgent):
         self.model.eval()
         obs = obs_dict['obs']
         processed_obs = self._preproc_obs(obs)
-        # value = self.model.a2c_network.eval_critic(processed_obs)  TODO: Change back to this line and delete the next
-        value = torch.zeros_like(obs[..., 0:1])
+        value = self.model.a2c_network.eval_critic(processed_obs)  # TODO: Change back to this line and delete the next
+        # value = torch.zeros_like(obs[..., 0:1])
         if self.normalize_value:
             value = self.value_mean_std(value, True)
         return value

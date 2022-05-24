@@ -35,8 +35,8 @@ from ..poselib.poselib.core.rotation3d import *
 from isaacgym.torch_utils import *
 from isaacgymenvs.utils.torch_jit_utils import *
 
-from tasks.amp.humanoid_amp_base import DOF_BODY_IDS, DOF_OFFSETS # TODO: for humanoid
-# from tasks.amp.a1_base import DOF_BODY_IDS, DOF_OFFSETS
+# from isaacgymenvs.tasks.amp.humanoid_amp_base import DOF_BODY_IDS, DOF_OFFSETS # TODO: for humanoid
+from isaacgymenvs.tasks.amp.a1_base import DOF_BODY_IDS, DOF_OFFSETS
 
 
 class MotionLib():
