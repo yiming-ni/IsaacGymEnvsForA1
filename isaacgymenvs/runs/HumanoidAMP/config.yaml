@@ -19,7 +19,7 @@ task:
     - left_foot
     terminationHeight: 0.5
     enableEarlyTermination: true
-    motion_file: amp_humanoid_run.npy
+    motion_file: amp_humanoid_walk.npy
     asset:
       assetFileName: mjcf/amp_humanoid.xml
     plane:
@@ -198,7 +198,7 @@ train:
       lr_schedule: constant
       kl_threshold: 0.008
       score_to_win: 20000
-      max_epochs: ${resolve_default:5000,${....max_iterations}}
+      max_epochs: ${resolve_default:1000,${....max_iterations}}
       save_best_after: 100
       save_frequency: 50
       print_stats: true
@@ -220,7 +220,7 @@ train:
       amp_minibatch_size: 4096
       disc_coef: 5
       disc_logit_reg: 0.05
-      disc_grad_penalty: 0.2
+      disc_grad_penalty: 5
       disc_reward_scale: 2
       disc_weight_decay: 0.0001
       normalize_amp_input: true
@@ -241,6 +241,6 @@ num_threads: 4
 solver_type: 1
 num_subscenes: 4
 test: true
-checkpoint: /home/yiming-ni/IsaacGymEnvs/isaacgymenvs/runs/AMP_run/nn/AMP_run_550.pth
+checkpoint: ''
 multi_gpu: false
 headless: false

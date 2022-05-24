@@ -1,9 +1,9 @@
 task:
-  name: A1AMP
+  name: A1Base
   physics_engine: ${..physics_engine}
   env:
     numEnvs: ${resolve_default:4096,${...num_envs}}
-    envSpacing: 5
+    envSpacing: 3
     episodeLength: 300
     cameraFollow: true
     enableDebugVis: false
@@ -15,17 +15,37 @@ task:
     numAMPObsSteps: 2
     localRootObs: false
     contactBodies:
-    - right_foot
-    - left_foot
+    - FR_calf
+    - FL_calf
+    - RR_calf
+    - RL_calf
     terminationHeight: 0.5
     enableEarlyTermination: true
     motion_file: amp_humanoid_walk.npy
     asset:
-      assetFileName: mjcf/a1.xml
+      assetFileName: urdf/a1_original.urdf
     plane:
       staticFriction: 1.0
       dynamicFriction: 1.0
       restitution: 0.0
+  asset:
+    foot_name: None
+    penalize_contacts_on: []
+    terminate_after_contacts_on: []
+    disable_gravity: false
+    collapse_fixed_joints: true
+    fix_base_link: false
+    default_dof_drive_mode: 3
+    self_collisions: 0
+    replace_cylinder_with_capsule: true
+    flip_visual_attachments: true
+    density: 0.001
+    angular_damping: 0.0
+    linear_damping: 0.0
+    max_angular_velocity: 1000.0
+    max_linear_velocity: 1000.0
+    armature: 0.0
+    thickness: 0.01
   sim:
     dt: 0.0166
     substeps: 2
@@ -75,7 +95,7 @@ task:
           schedule: linear
           schedule_steps: 3000
       actor_params:
-        humanoid:
+        a1:
           color: true
           rigid_body_properties:
             mass:
@@ -138,6 +158,8 @@ task:
               distribution: gaussian
               schedule: linear
               schedule_steps: 3000
+            soft_dof_pos_limit: 1
+            soft_dof_torque_limit: 1
 train:
   params:
     seed: ${...seed}

@@ -47,6 +47,7 @@ class AMPPlayerContinuous(common_player.CommonPlayer):
     def restore(self, fn):
         super().restore(fn)
         if self._normalize_amp_input:
+            # load stored motion
             checkpoint = torch_ext.load_checkpoint(fn)
             self._amp_input_mean_std.load_state_dict(checkpoint['amp_input_mean_std'])
         return
