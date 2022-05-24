@@ -1,9 +1,9 @@
 task:
-  name: A1AMP
+  name: HumanoidAMP
   physics_engine: ${..physics_engine}
   env:
-    numEnvs: ${resolve_default:5480,${...num_envs}}
-    envSpacing: 3
+    numEnvs: ${resolve_default:4096,${...num_envs}}
+    envSpacing: 5
     episodeLength: 300
     cameraFollow: true
     enableDebugVis: false
@@ -15,37 +15,17 @@ task:
     numAMPObsSteps: 2
     localRootObs: false
     contactBodies:
-    - FR_calf
-    - FL_calf
-    - RR_calf
-    - RL_calf
+    - right_foot
+    - left_foot
     terminationHeight: 0.5
     enableEarlyTermination: true
     motion_file: amp_humanoid_walk.npy
     asset:
-      assetFileName: urdf/a1_original.urdf
+      assetFileName: mjcf/amp_humanoid.xml
     plane:
       staticFriction: 1.0
       dynamicFriction: 1.0
       restitution: 0.0
-  asset:
-    foot_name: None
-    penalize_contacts_on: []
-    terminate_after_contacts_on: []
-    disable_gravity: false
-    collapse_fixed_joints: true
-    fix_base_link: false
-    default_dof_drive_mode: 3
-    self_collisions: 0
-    replace_cylinder_with_capsule: true
-    flip_visual_attachments: true
-    density: 0.001
-    angular_damping: 0.0
-    linear_damping: 0.0
-    max_angular_velocity: 1000.0
-    max_linear_velocity: 1000.0
-    armature: 0.0
-    thickness: 0.01
   sim:
     dt: 0.0166
     substeps: 2
@@ -199,7 +179,7 @@ train:
     load_checkpoint: ${if:${...checkpoint},True,False}
     load_path: ${...checkpoint}
     config:
-      name: ${resolve_default:A1AMP,${....experiment}}
+      name: ${resolve_default:HumanoidAMP,${....experiment}}
       full_experiment_name: ${.name}
       env_name: rlgpu
       ppo: true
@@ -260,7 +240,7 @@ graphics_device_id: 0
 num_threads: 4
 solver_type: 1
 num_subscenes: 4
-test: false
+test: true
 checkpoint: ''
 multi_gpu: false
 headless: false
