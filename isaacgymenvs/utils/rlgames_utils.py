@@ -33,7 +33,7 @@ import torch
 import numpy as np
 from typing import Callable
 
-from tasks import isaacgym_task_map
+from isaacgymenvs.tasks import isaacgym_task_map
 
 
 def get_rlgames_env_creator(
@@ -85,8 +85,8 @@ def get_rlgames_env_creator(
 
         # create native task and pass custom config
         env = isaacgym_task_map[task_name](
-            # cfg=task_config,
-            config=task_config,  # TODO: This is only for A1Base
+            cfg=task_config,
+            # config=task_config,  # TODO: This is only for A1Base
             sim_device=_sim_device,
             graphics_device_id=graphics_device_id,
             headless=headless
