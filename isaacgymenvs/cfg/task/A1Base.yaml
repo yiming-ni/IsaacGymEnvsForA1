@@ -41,9 +41,28 @@ env:
     dynamicFriction: 1.0
     restitution: 0.0
 
+init_state:
+  default_joint_angles: { # = target angles [rad] when action = 0.0
+    'FL_hip_joint': 0.0,   # [rad]
+    'RL_hip_joint': 0.0,   # [rad]
+    'FR_hip_joint': 0.0 ,  # [rad]
+    'RR_hip_joint': 0.0,   # [rad]
+
+    'FL_thigh_joint': 0.9,     # [rad]
+    'RL_thigh_joint': 0.9,   # [rad]
+    'FR_thigh_joint': 0.9,     # [rad]
+    'RR_thigh_joint': 0.9,   # [rad]
+
+    'FL_calf_joint': -1.8,   # [rad]
+    'RL_calf_joint': -1.8,    # [rad]
+    'FR_calf_joint': -1.8,  # [rad]
+    'RR_calf_joint': -1.8,    # [rad]
+  }
 control:
   control_type: 'P'
   action_scale: 0.25
+  stiffness: {'joint': 80.}  # [N*m/rad]
+  damping: {'joint': 1.0}
 
 asset:
   foot_name: "None" # name of the feet bodies, used to index body state and contact force tensors

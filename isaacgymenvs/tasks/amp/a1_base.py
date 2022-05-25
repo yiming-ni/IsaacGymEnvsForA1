@@ -124,10 +124,27 @@ class A1Base(VecTask):
         self.default_dof_pos = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         self.last_dof_vel = torch.zeros_like(self._dof_vel)
 
+        for i in range(self.num_dof):
+            name = self.dof_names[i]
+            angle = self.cfg["init_state"]["default_joint_angles"][name]
+            self.default_dof_pos[i] = angle
+            found = False
+            for dof_name in self.cfg["control"]["stiffness"].keys():
+                if dof_name in name:
+                    self.p_gains[i] = self.cfg["control"]["stiffness"][dof_name]
+                    self.d_gains[i] = self.cfg["control"]["damping"][dof_name]
+                    found = True
+            if not found:
+                self.p_gains[i] = 0.
+                self.d_gains[i] = 0.
+                if self.cfg["control"]["control_type"] in ["P", "V"]:
+                    print(f"PD gain of joint {name} were not defined, setting them to zero")
+        self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
+
         self._initial_dof_pos = torch.zeros_like(self._dof_pos, device=self.device, dtype=torch.float)
         initial_dof = np.array([0, 0.9, -1.8] * 4)
         initial_dof = torch.tensor(initial_dof, device=self.device, dtype=torch.float)
-        self._initial_dof_pos[..., : ] = initial_dof
+        self._initial_dof_pos[..., :] = initial_dof
         # right_shoulder_x_handle = self.gym.find_actor_dof_handle(self.envs[0], self.a1_handles[0], "right_shoulder_x")
         # left_shoulder_x_handle = self.gym.find_actor_dof_handle(self.envs[0], self.a1_handles[0], "left_shoulder_x")
         # self._initial_dof_pos[:, right_shoulder_x_handle] = 0.5 * np.pi
@@ -196,8 +213,8 @@ class A1Base(VecTask):
                                             self.cfg["task"]["randomization_params"]["actor_params"]["a1"][
                                                 "dof_properties"]["soft_dof_pos_limit"]
                 self.torque_limits[i] *= \
-                self.cfg["task"]["randomization_params"]["actor_params"]["a1"]["dof_properties"][
-                    "soft_dof_torque_limit"]
+                    self.cfg["task"]["randomization_params"]["actor_params"]["a1"]["dof_properties"][
+                        "soft_dof_torque_limit"]
         return props
 
     def reset_idx(self, env_ids):
@@ -278,9 +295,10 @@ class A1Base(VecTask):
         self.motor_efforts = to_torch(motor_efforts, device=self.device)
 
         self.torso_index = 0
-        self.body_dict = self.gym.get_asset_rigid_body_names(a1_asset)
+        # self.body_dict = self.gym.get_asset_rigid_body_names(a1_asset)
         # ['base', 'FL_hip', 'FL_thigh', 'FL_calf', 'FL_foot', 'FR_hip', 'FR_thigh', 'FR_calf', 'FR_foot',
         # 'RL_hip', 'RL_thigh', 'RL_calf', 'RL_foot', 'RR_hip', 'RR_thigh', 'RR_calf', 'RR_foot']
+        self.dof_names = self.gym.get_asset_dof_names(a1_asset)
         self.num_bodies = self.gym.get_asset_rigid_body_count(a1_asset)
         self.num_dof = self.gym.get_asset_dof_count(a1_asset)
         self.num_joints = self.gym.get_asset_joint_count(a1_asset)
@@ -484,12 +502,50 @@ class A1Base(VecTask):
         if control_type == "P":
             torques = p_gains * (actions_scaled + self.default_dof_pos - self._dof_pos) - d_gains * self._dof_vel
         elif control_type == "V":
-            torques = p_gains * (actions_scaled - self._dof_vel) - d_gains * (self._dof_vel - self.last_dof_vel) / self.sim_params.dt
+            torques = p_gains * (actions_scaled - self._dof_vel) - d_gains * (
+                    self._dof_vel - self.last_dof_vel) / self.sim_params.dt
         elif control_type == "T":
             torques = actions_scaled
         else:
             raise NameError(f'Unknown controller type: {control_type}')
         return torch.clip(torques, -self.torque_limits, self.torque_limits)
+
+    def step(self, actions):
+        if self.dr_randomizations.get('actions', None):
+            actions = self.dr_randomizations['actions']['noise_lambda'](actions)
+
+        action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
+        self.actions = action_tensor.to(self.device).clone()
+        # step physics and render each frame
+        self.render()
+        for _ in range(self.control_freq_inv):
+            self.torques = self._compute_torques(self.actions).view(self.torques.shape)
+            self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
+            self.gym.simulate(self.sim)
+            if self.device == 'cpu':
+                self.gym.fetch_results(self.sim, True)
+            self.gym.refresh_dof_state_tensor(self.sim)
+
+        # fill time out buffer
+        self.timeout_buf = torch.where(self.progress_buf >= self.max_episode_length - 1,
+                                       torch.ones_like(self.timeout_buf), torch.zeros_like(self.timeout_buf))
+
+        # compute observations, rewards, resets, ...
+        self.post_physics_step()
+
+        # randomize observations
+        if self.dr_randomizations.get('observations', None):
+            self.obs_buf = self.dr_randomizations['observations']['noise_lambda'](self.obs_buf)
+
+        self.extras["time_outs"] = self.timeout_buf.to(self.rl_device)
+
+        self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+
+        # asymmetric actor-critic
+        if self.num_states > 0:
+            self.obs_dict["states"] = self.get_state()
+
+        return self.obs_dict, self.rew_buf.to(self.rl_device), self.reset_buf.to(self.rl_device), self.extras
 
     def pre_physics_step(self, actions):
         self.actions = actions.to(self.device).clone()
