@@ -103,15 +103,15 @@ def launch_rlg_hydra(cfg: DictConfig):
     # register new AMP network builder and agent
     def build_runner(algo_observer):
         runner = Runner(algo_observer)
-        # runner.algo_factory.register_builder('amp_continuous', lambda **kwargs : amp_continuous.AMPAgent(**kwargs))
-        # runner.model_builder.model_factory.register_builder('continuous_amp', lambda network, **kwargs : amp_models.ModelAMPContinuous(network))
-        # runner.model_builder.network_factory.register_builder('amp', lambda **kwargs : amp_network_builder.AMPBuilder())
+        runner.algo_factory.register_builder('amp_continuous', lambda **kwargs : amp_continuous.AMPAgent(**kwargs))
+        runner.model_builder.model_factory.register_builder('continuous_amp', lambda network, **kwargs : amp_models.ModelAMPContinuous(network))
+        runner.model_builder.network_factory.register_builder('amp', lambda **kwargs : amp_network_builder.AMPBuilder())
         # TODO: above for AMP, below are non-AMP, player remains the same
-        runner.algo_factory.register_builder('amp_continuous', lambda **kwargs : common_agent.CommonAgent(**kwargs))
-        runner.model_builder.model_factory.register_builder('continuous_amp',
-                                                            lambda network, **kwargs: ModelA2CContinuousLogStd(
-                                                                network))
-        runner.model_builder.network_factory.register_builder('amp', lambda **kwargs: network_builder.A2CBuilder())
+        # runner.algo_factory.register_builder('amp_continuous', lambda **kwargs : common_agent.CommonAgent(**kwargs))
+        # runner.model_builder.model_factory.register_builder('continuous_amp',
+        #                                                     lambda network, **kwargs: ModelA2CContinuousLogStd(
+        #                                                         network))
+        # runner.model_builder.network_factory.register_builder('amp', lambda **kwargs: network_builder.A2CBuilder())
 
         runner.player_factory.register_builder('amp_continuous',
                                                lambda **kwargs: amp_players.AMPPlayerContinuous(**kwargs))
