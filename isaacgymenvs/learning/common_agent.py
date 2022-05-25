@@ -276,6 +276,7 @@ class CommonAgent(a2c_continuous.A2CAgent):
             if self.has_central_value:
                 self.experience_buffer.update_data('states', n, self.obs['states'])
 
+            res_dict['actions'][..., :] = 1
             self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'])
             shaped_rewards = self.rewards_shaper(rewards)
             self.experience_buffer.update_data('rewards', n, shaped_rewards)
@@ -468,8 +469,8 @@ class CommonAgent(a2c_continuous.A2CAgent):
         self.model.eval()
         obs = obs_dict['obs']
         processed_obs = self._preproc_obs(obs)
-        value = self.model.a2c_network.eval_critic(processed_obs)  # TODO: Change back to this line and delete the next
-        # value = torch.zeros_like(obs[..., 0:1])
+        # value = self.model.a2c_network.eval_critic(processed_obs)  # TODO: Change back to this line and delete the next
+        value = torch.zeros_like(obs[..., 0:1])
         if self.normalize_value:
             value = self.value_mean_std(value, True)
         return value

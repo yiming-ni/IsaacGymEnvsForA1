@@ -109,7 +109,9 @@ class A1Base(VecTask):
 
         self._root_states = gymtorch.wrap_tensor(actor_root_state)
         self._initial_root_states = self._root_states.clone()
-        self._initial_root_states[:, 7:13] = 0
+        self._initial_root_states[:] = 0
+        self._initial_root_states[..., 2] = 0.25870023
+        self._initial_root_states[..., 6] = 1
 
         # create some wrapper tensors for different slices
         self._dof_state = gymtorch.wrap_tensor(dof_state_tensor)
@@ -117,6 +119,9 @@ class A1Base(VecTask):
         self._dof_vel = self._dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
 
         self._initial_dof_pos = torch.zeros_like(self._dof_pos, device=self.device, dtype=torch.float)
+        initial_dof = np.array([0, 0.9, -1.8] * 4)
+        initial_dof = torch.tensor(initial_dof, device=self.device, dtype=torch.float)
+        self._initial_dof_pos[..., : ] = initial_dof
         # right_shoulder_x_handle = self.gym.find_actor_dof_handle(self.envs[0], self.a1_handles[0], "right_shoulder_x")
         # left_shoulder_x_handle = self.gym.find_actor_dof_handle(self.envs[0], self.a1_handles[0], "left_shoulder_x")
         # self._initial_dof_pos[:, right_shoulder_x_handle] = 0.5 * np.pi
@@ -320,7 +325,7 @@ class A1Base(VecTask):
             contact_filter = 1
             handle = self.gym.create_actor(env_ptr, a1_asset, start_pose, "a1", i, contact_filter, 0)
 
-            dof_props = self._process_dof_props(dof_props_asset, i)
+            # dof_props = self._process_dof_props(dof_props_asset, i)
 
             self.gym.enable_actor_dof_force_sensors(env_ptr, handle)
 
