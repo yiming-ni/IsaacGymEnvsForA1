@@ -110,7 +110,7 @@ class A1Base(VecTask):
         self._root_states = gymtorch.wrap_tensor(actor_root_state)
         self._initial_root_states = self._root_states.clone()
         self._initial_root_states[:] = 0
-        self._initial_root_states[..., 2] = 0.25870023
+        self._initial_root_states[..., 2] = 0.27
         self._initial_root_states[..., 6] = 1
 
         # create some wrapper tensors for different slices
@@ -121,13 +121,10 @@ class A1Base(VecTask):
                                    requires_grad=False)
         self.p_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.d_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
-        self.default_dof_pos = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         self.last_dof_vel = torch.zeros_like(self._dof_vel)
 
         for i in range(self.num_dof):
             name = self.dof_names[i]
-            angle = self.cfg["init_state"]["default_joint_angles"][name]
-            self.default_dof_pos[i] = angle
             found = False
             for dof_name in self.cfg["control"]["stiffness"].keys():
                 if dof_name in name:
@@ -139,7 +136,6 @@ class A1Base(VecTask):
                 self.d_gains[i] = 0.
                 if self.cfg["control"]["control_type"] in ["P", "V"]:
                     print(f"PD gain of joint {name} were not defined, setting them to zero")
-        self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
 
         self._initial_dof_pos = torch.zeros_like(self._dof_pos, device=self.device, dtype=torch.float)
         initial_dof = np.array([0, 0.9, -1.8] * 4)
@@ -163,6 +159,9 @@ class A1Base(VecTask):
 
         if self.viewer != None:
             self._init_camera()
+
+        if self._pd_control:
+            self._build_pd_action_offset_scale()
 
         return
 
@@ -349,7 +348,7 @@ class A1Base(VecTask):
             contact_filter = 1
             handle = self.gym.create_actor(env_ptr, a1_asset, start_pose, "a1", i, contact_filter, 0)
 
-            dof_props = self._process_dof_props(dof_props_asset, i)
+            self._process_dof_props(dof_props_asset, i)
 
             self.gym.enable_actor_dof_force_sensors(env_ptr, handle)
 
@@ -362,7 +361,7 @@ class A1Base(VecTask):
 
             if (self._pd_control):
                 dof_prop = self.gym.get_asset_dof_properties(a1_asset)
-                dof_prop["driveMode"] = gymapi.DOF_MODE_POS
+                dof_prop["driveMode"] = gymapi.DOF_MODE_EFFORT  # changed from DOF_MODE_POS
                 self.gym.set_actor_dof_properties(env_ptr, handle, dof_prop)
 
         dof_prop = self.gym.get_actor_dof_properties(env_ptr, handle)
@@ -381,8 +380,8 @@ class A1Base(VecTask):
         self._key_body_ids = self._build_key_body_ids_tensor(env_ptr, handle)
         self._contact_body_ids = self._build_contact_body_ids_tensor(env_ptr, handle)
 
-        if self._pd_control:
-            self._build_pd_action_offset_scale()
+        # if self._pd_control:
+        #     self._build_pd_action_offset_scale()
 
         return
 
@@ -416,8 +415,12 @@ class A1Base(VecTask):
 
         self._pd_action_offset = 0.5 * (lim_high + lim_low)
         self._pd_action_scale = 0.5 * (lim_high - lim_low)
-        self._pd_action_offset = to_torch(self._pd_action_offset, device=self.device)
-        self._pd_action_scale = to_torch(self._pd_action_scale, device=self.device)
+        # self._pd_action_offset = to_torch(self._pd_action_offset, device=self.device)
+        self._pd_action_offset = self._initial_dof_pos[0,...]
+        # self._pd_action_scale = to_torch(self._pd_action_scale, device=self.device)
+        lim_high = torch.tensor(lim_high, dtype=torch.float, device=self.device)
+        lim_low = torch.tensor(lim_low, dtype=torch.float, device=self.device)
+        self._pd_action_scale = torch.maximum(torch.abs(lim_high - self._pd_action_offset), torch.abs(lim_low - self._pd_action_offset))
 
         return
 
@@ -488,26 +491,26 @@ class A1Base(VecTask):
         self._terminate_buf[env_ids] = 0
         return
 
-    def _compute_torques(self, actions):
+    def _compute_torques(self, pd_tar):
         """compute torques from actions.
            actions can be position or velocity targets given to a PD controller, or scaled torques.
            torques must have the same dimension as the number of DOFs, even if some DOFs are not actuated.
 
         returns: torques sent to the simulation
         """
-        actions_scaled = actions * self.cfg["control"].get("action_scale", 0.25)
         control_type = self.cfg["control"].get("control_type", "P")
         p_gains = self.p_gains
         d_gains = self.d_gains
         if control_type == "P":
-            torques = p_gains * (actions_scaled + self.default_dof_pos - self._dof_pos) - d_gains * self._dof_vel
+            torques = p_gains * (pd_tar - self._dof_pos) - d_gains * self._dof_vel
         elif control_type == "V":
-            torques = p_gains * (actions_scaled - self._dof_vel) - d_gains * (
+            torques = p_gains * (pd_tar - self._dof_vel) - d_gains * (
                     self._dof_vel - self.last_dof_vel) / self.sim_params.dt
         elif control_type == "T":
-            torques = actions_scaled
+            torques = pd_tar
         else:
             raise NameError(f'Unknown controller type: {control_type}')
+        # return torques
         return torch.clip(torques, -self.torque_limits, self.torque_limits)
 
     def step(self, actions):
@@ -518,8 +521,9 @@ class A1Base(VecTask):
         self.actions = action_tensor.to(self.device).clone()
         # step physics and render each frame
         self.render()
+        pd_tar = self._action_to_pd_targets(self.actions)
         for _ in range(self.control_freq_inv):
-            self.torques = self._compute_torques(self.actions).view(self.torques.shape)
+            self.torques = self._compute_torques(pd_tar).view(self.torques.shape)
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
             self.gym.simulate(self.sim)
             if self.device == 'cpu':
@@ -551,10 +555,10 @@ class A1Base(VecTask):
         self.actions = actions.to(self.device).clone()
 
         if (self._pd_control):
-            # pd_tar = self._action_to_pd_targets(self.actions)
+            pd_tar = self._action_to_pd_targets(self.actions)
             # pd_tar_tensor = gymtorch.unwrap_tensor(pd_tar)
             # self.gym.set_dof_position_target_tensor(self.sim, pd_tar_tensor)
-            self.torques = self._compute_torques(self.actions).view(self.torques.shape)
+            self.torques = self._compute_torques(pd_tar).view(self.torques.shape)
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
 
         else:
@@ -757,8 +761,34 @@ def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rig
         # first timestep can sometimes still have nonzero contact forces
         # so only check after first couple of steps
         has_fallen *= (progress_buf > 1)
-        terminated = torch.where(has_fallen, torch.ones_like(reset_buf), terminated)
+        terminated = torch.where(has_fallen, torch.ones_like(reset_buf), terminated)  # TODO: undo the mult 0
 
     reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), terminated)
 
     return reset, terminated
+
+
+class A1BaseTrial(A1Base):
+    def __int__(self):
+        super.__init__()
+
+    def post_physics_step(self):
+        self.prev_root_state = self._root_states.clone()
+        self.progress_buf += 1
+
+        self._refresh_sim_tensors()
+        self._compute_observations()
+        self._compute_reward(self.actions)
+        self._compute_reset()
+
+        self.extras["terminate"] = self._terminate_buf
+
+        # debug viz
+        if self.viewer and self.debug_viz:
+            self._update_debug_viz()
+
+        return
+
+    def _compute_reward(self, actions):
+
+        return
