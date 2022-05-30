@@ -50,6 +50,7 @@ from isaacgymenvs.learning import amp_continuous
 from isaacgymenvs.learning import amp_players
 from isaacgymenvs.learning import amp_models
 from isaacgymenvs.learning import amp_network_builder, common_agent
+from isaacgymenvs.learning import base_network_builder
 from rl_games.algos_torch.models import ModelA2CContinuousLogStd
 from rl_games.algos_torch import network_builder
 
@@ -111,8 +112,9 @@ def launch_rlg_hydra(cfg: DictConfig):
         runner.model_builder.model_factory.register_builder('continuous_amp',
                                                             lambda network, **kwargs: ModelA2CContinuousLogStd(
                                                                 network))
-        runner.model_builder.network_factory.register_builder('amp', lambda **kwargs: network_builder.A2CBuilder())
+        runner.model_builder.network_factory.register_builder('amp', lambda **kwargs: base_network_builder.BaseBuilder())
 
+        # runner.model_builder.network_factory.register_builder('amp', lambda **kwargs: network_builder.A2CBuilder())
         runner.player_factory.register_builder('amp_continuous',
                                                lambda **kwargs: amp_players.AMPPlayerContinuous(**kwargs))
 
