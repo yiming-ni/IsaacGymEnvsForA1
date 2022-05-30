@@ -110,7 +110,7 @@ class A1Base(VecTask):
         self._root_states = gymtorch.wrap_tensor(actor_root_state)
         self._initial_root_states = self._root_states.clone()
         self._initial_root_states[:] = 0
-        self._initial_root_states[..., 2] = 0.27
+        self._initial_root_states[..., 2] = 0.2676
         self._initial_root_states[..., 6] = 1
 
         # create some wrapper tensors for different slices
@@ -773,7 +773,7 @@ class A1BaseTrial(A1Base):
         super.__init__()
 
     def post_physics_step(self):
-        self.prev_root_state = self._root_states.clone()
+        self._prev_root_states = self._root_states.clone()
         self.progress_buf += 1
 
         self._refresh_sim_tensors()
@@ -790,5 +790,20 @@ class A1BaseTrial(A1Base):
         return
 
     def _compute_reward(self, actions):
+        tar_speed = 100
+        vel_err_scale = 0.25
+        tangent_err_w = 0.1
+        root_pos = self._root_states[:, 0:3]
+        prev_root_pos = self._prev_root_states[:, 0:3]
+        delta_root_pos = root_pos - prev_root_pos
+        root_vel = delta_root_pos / self.dt
+        tar_dir_speed = root_vel[..., 0]
+        tangent_speed = root_vel[..., 1]
 
+        tar_vel_err = tar_speed - tar_dir_speed
+        tangent_vel_err = tangent_speed
+        dir_reward = torch.exp(-vel_err_scale * (tar_vel_err * tar_vel_err +
+                                                 tangent_err_w * tangent_vel_err * tangent_vel_err))
+
+        self.rew_buf[:] = dir_reward
         return

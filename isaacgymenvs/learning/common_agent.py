@@ -276,7 +276,7 @@ class CommonAgent(a2c_continuous.A2CAgent):
             if self.has_central_value:
                 self.experience_buffer.update_data('states', n, self.obs['states'])
 
-            # res_dict['actions'][...,:] = 0
+            # res_dict['actions'][...,:] = 0  # TODO: test remove this line
             self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'])
             shaped_rewards = self.rewards_shaper(rewards)
             self.experience_buffer.update_data('rewards', n, shaped_rewards)
@@ -350,10 +350,10 @@ class CommonAgent(a2c_continuous.A2CAgent):
         with torch.cuda.amp.autocast(enabled=self.mixed_precision):
             res_dict = self.model(batch_dict)
             action_log_probs = res_dict['prev_neglogp']
-            values = res_dict['value']
+            values = res_dict['values']  # TODO: changed from 'value'
             entropy = res_dict['entropy']
-            mu = res_dict['mu']
-            sigma = res_dict['sigma']
+            mu = res_dict['mus']  # TODO: changed from 'mu'
+            sigma = res_dict['sigmas']  # TODO: changed from 'sigma'
 
             a_info = self._actor_loss(old_action_log_probs_batch, action_log_probs, advantage, curr_e_clip)
             a_loss = a_info['actor_loss']
@@ -469,8 +469,8 @@ class CommonAgent(a2c_continuous.A2CAgent):
         self.model.eval()
         obs = obs_dict['obs']
         processed_obs = self._preproc_obs(obs)
-        # value = self.model.a2c_network.eval_critic(processed_obs)  # TODO: Change back to this line and delete the next
-        value = torch.zeros_like(obs[..., 0:1])
+        value = self.model.a2c_network.eval_critic(processed_obs)  # TODO: Change back to this line and delete the next
+        # value = torch.zeros_like(obs[..., 0:1])
         if self.normalize_value:
             value = self.value_mean_std(value, True)
         return value
