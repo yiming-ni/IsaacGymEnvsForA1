@@ -17,13 +17,13 @@ from isaacgym import gymtorch
 
 from .amp.a1_base import A1Base, dof_to_obs
 from .amp.utils_amp import gym_util
-from .amp.utils_amp.motion_lib import MotionLib
+from .amp.utils_amp.motion_lib import A1MotionLib
 
 from isaacgym.torch_utils import *
 from isaacgymenvs.utils.torch_jit_utils import *
 
 
-NUM_AMP_OBS_PER_STEP = 13 + 52 + 28 + 12 # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
+NUM_AMP_OBS_PER_STEP = 1 + 6 + 3 + 3 + 12 + 12 + 12  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
 
 
 class A1AMP(A1Base):
@@ -61,6 +61,9 @@ class A1AMP(A1Base):
         self._hist_amp_obs_buf = self._amp_obs_buf[:, 1:]
         
         self._amp_obs_demo_buf = None
+
+        self._num_motions = self._motion_lib.num_motions()
+        self._motion_num_frames = self._motion_lib.get_motion_num_frames(0)  # TODO: length for motions might be different
 
         return
 
@@ -118,7 +121,7 @@ class A1AMP(A1Base):
         
 
     def _load_motion(self, motion_file):
-        self._motion_lib = MotionLib(motion_file=motion_file, 
+        self._motion_lib = A1MotionLib(motion_file=motion_file,
                                      num_dofs=self.num_dof,
                                      key_body_ids=self._key_body_ids.cpu().numpy(), 
                                      device=self.device)
@@ -269,6 +272,41 @@ class A1AMP(A1Base):
                                                                     self._dof_vel[env_ids], key_body_pos[env_ids],
                                                                     self._local_root_obs)
         return
+
+    def step(self, actions):
+
+        action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
+        self.actions = action_tensor.to(self.device).clone()
+        # step physics and render each frame
+        self.render()
+
+        for i in range(self._motion_num_frames):
+            curr_root_states = torch.zeros_like(self._initial_root_states)
+            curr_root_states[..., :7] = to_torch(self._motion_lib.get_root_states()[0][i, :], device=self.device)
+
+            curr_dof_state = torch.zeros_like(self._dof_state)
+            curr_dof_pos = torch.zeros(self.num_envs, self.num_dof)
+            curr_dof_pos[..., ...] = to_torch(self._motion_lib.get_dof_pos()[0][i, :], device=self.device)
+            curr_dof_state[..., 0] = curr_dof_pos.view(self.num_envs * self.num_dof,)
+
+            self.gym.set_actor_root_state_tensor(self.sim, gymtorch.unwrap_tensor(curr_root_states))
+            self.gym.set_dof_state_tensor(self.sim, gymtorch.unwrap_tensor(curr_dof_state))
+
+        self.post_physics_step()
+
+        # randomize observations
+        if self.dr_randomizations.get('observations', None):
+            self.obs_buf = self.dr_randomizations['observations']['noise_lambda'](self.obs_buf)
+
+        self.extras["time_outs"] = self.timeout_buf.to(self.rl_device)
+
+        self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+
+        # asymmetric actor-critic
+        if self.num_states > 0:
+            self.obs_dict["states"] = self.get_state()
+
+        return self.obs_dict, self.rew_buf.to(self.rl_device), self.reset_buf.to(self.rl_device), self.extras
 
 
 #####################################################################

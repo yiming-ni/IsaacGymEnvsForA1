@@ -46,7 +46,7 @@ params:
   load_path: ${...checkpoint} # path to the checkpoint to load
 
   config:
-    name: ${resolve_default:A1AMP,${....experiment}}
+    name: ${resolve_default:A1BaseTrial,${....experiment}}
     full_experiment_name: ${.name}
     env_name: rlgpu
     ppo: True
@@ -65,7 +65,7 @@ params:
     lr_schedule: constant
     kl_threshold: 0.008
     score_to_win: 20000
-    max_epochs: ${resolve_default:1000,${....max_iterations}}
+    max_epochs: ${resolve_default:5000,${....max_iterations}}
     save_best_after: 100
     save_frequency: 50
     print_stats: True

@@ -1,4 +1,3 @@
-LICENSE.txt
 README.md
 setup.py
 isaacgymenvs.egg-info/PKG-INFO

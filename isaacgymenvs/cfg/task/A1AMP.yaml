@@ -13,19 +13,19 @@ env:
   
   pdControl: True
   powerScale: 1.0
-  controlFrequencyInv: 2 # 30 Hz
+  controlFrequencyInv: 30 # 1000 Hz
   stateInit: "Random"
   hybridInitProb: 0.5
   numAMPObsSteps: 2
 
   localRootObs: False
-  contactBodies: ["FR_calf", "FL_calf", "RR_calf", "RL_calf"]
-  terminationHeight: 0.5
+  contactBodies: ["FR_foot", "FL_foot", "RR_foot", "RL_foot"]
+  terminationHeight: 0.15
   enableEarlyTermination: True
 
   # animation files to learn from
   # these motions should use hyperparameters from HumanoidAMPPPO.yaml
-  motion_file: "amp_humanoid_walk.npy"
+  motion_file: "a1_original_pace.json"
   #motion_file: "amp_humanoid_run.npy"
   #motion_file: "amp_humanoid_dance.npy"
 
@@ -40,6 +40,12 @@ env:
     staticFriction: 1.0
     dynamicFriction: 1.0
     restitution: 0.0
+
+control:
+  control_type: 'P'
+  action_scale: 0.25
+  stiffness: {'joint': 80.}  # [N*m/rad]
+  damping: {'joint': 1.0}
 
 asset:
   foot_name: "None" # name of the feet bodies, used to index body state and contact force tensors
@@ -63,7 +69,7 @@ asset:
 
 
 sim:
-  dt: 0.0166 # 1/60 s
+  dt: 0.001 # 1/60 s
   substeps: 2
   up_axis: "z"
   use_gpu_pipeline: ${eq:${...pipeline},"gpu"}

@@ -19,8 +19,8 @@ env:
   numAMPObsSteps: 2
 
   localRootObs: False
-  contactBodies: ["FR_calf", "FL_calf", "RR_calf", "RL_calf"]
-  terminationHeight: 0.5
+  contactBodies: ["FR_foot", "FL_foot", "RR_foot", "RL_foot"]
+  terminationHeight: 0.15
   enableEarlyTermination: True
 
   # animation files to learn from
