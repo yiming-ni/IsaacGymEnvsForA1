@@ -34,9 +34,10 @@ from ..poselib.poselib.skeleton.skeleton3d import SkeletonMotion
 from ..poselib.poselib.core.rotation3d import *
 from isaacgym.torch_utils import *
 from isaacgymenvs.utils.torch_jit_utils import *
+import json
 
-from isaacgymenvs.tasks.amp.humanoid_amp_base import DOF_BODY_IDS, DOF_OFFSETS # TODO: for humanoid
-# from isaacgymenvs.tasks.amp.a1_base import DOF_BODY_IDS, DOF_OFFSETS
+# from tasks.amp.humanoid_amp_base import DOF_BODY_IDS, DOF_OFFSETS # TODO: for humanoid
+from tasks.amp.a1_base import DOF_BODY_IDS, DOF_OFFSETS
 
 
 class MotionLib():
@@ -150,6 +151,7 @@ class MotionLib():
         
         local_rot = slerp(local_rot0, local_rot1, torch.unsqueeze(blend, axis=-1))
         dof_pos = self._local_rotation_to_dof(local_rot)
+        # replace 151 and 152 with linear interpolation
 
         return root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos
 
@@ -323,3 +325,178 @@ class MotionLib():
                 assert(False)
 
         return dof_vel
+
+
+class A1MotionLib(MotionLib):
+    def __init__(self, motion_file, num_dofs, key_body_ids, device):
+        super().__init__(motion_file=motion_file, num_dofs=num_dofs, key_body_ids=key_body_ids, device=device)
+
+    def _load_motions(self, motion_file):
+        self._motions = []  # stores root states
+        self._local_rots = []
+        self._key_body_pos = []
+        self._dof_vels = []
+        self._motion_lengths = []
+        self._motion_weights = []
+        self._motion_fps = []
+        self._motion_dt = []
+        self._motion_num_frames = []
+        self._motion_files = []
+
+        total_len = 0.0
+
+        motion_files, motion_weights = self._fetch_motion_files(motion_file)
+        num_motion_files = len(motion_files)
+        for f in range(num_motion_files):
+            curr_file = motion_files[f]
+            print("Loading {:d}/{:d} motion files: {:s}".format(f + 1, num_motion_files, curr_file))
+            with open(curr_file, "r") as jf:
+                curr_motion = json.load(jf)
+            curr_motion["Frames"] = np.array(curr_motion["Frames"])
+            curr_motion["LinkPos"] = np.array(curr_motion["LinkPos"])
+            curr_dt = curr_motion["FrameDuration"]
+            motion_fps = 1.0 / curr_dt
+
+            num_frames = len(curr_motion["Frames"])
+            curr_len = 1.0 / motion_fps * (num_frames - 1)
+            motion_local_rots = curr_motion["Frames"][:, 7:]
+            motion_body_pos = curr_motion["LinkPos"]
+
+            self._motion_fps.append(motion_fps)
+            self._motion_dt.append(curr_dt)
+            self._motion_num_frames.append(num_frames)
+            self._key_body_pos.append(motion_body_pos)
+            self._motions.append(curr_motion["Frames"][:, :7])
+            self._local_rots.append(motion_local_rots)
+
+            curr_dof_vels = self._compute_dof_vels(num_frames, curr_dt, motion_local_rots)
+            self._dof_vels.append(curr_dof_vels)
+
+            self._motion_lengths.append(curr_len)
+
+            curr_weight = motion_weights[f]
+            self._motion_weights.append(curr_weight)
+            self._motion_files.append(curr_file)
+
+        self._motion_lengths = np.array(self._motion_lengths)
+        self._motion_weights = np.array(self._motion_weights)
+        self._motion_weights /= np.sum(self._motion_weights)
+
+        self._motion_fps = np.array(self._motion_fps)
+        self._motion_dt = np.array(self._motion_dt)
+        self._motion_num_frames = np.array(self._motion_num_frames)
+
+        num_motions = self.num_motions()
+        total_len = self.get_total_length()
+
+        print("Loaded {:d} motions with a total length of {:.3f}s.".format(num_motions, total_len))
+
+        return
+
+    def _compute_dof_vels(self, num_frames, dt, local_rots):
+        dof_vels = []
+
+        for f in range(num_frames - 1):
+            local_rot0 = local_rots[f]
+            local_rot1 = local_rots[f + 1]
+            frame_dof_vel = (local_rot1 - local_rot0) / dt
+            dof_vels.append(frame_dof_vel)
+
+        dof_vels.append(dof_vels[-1])
+        dof_vels = np.array(dof_vels)
+
+        return dof_vels
+
+    def _get_num_bodies(self):
+        return 12  # 12 joints for a1
+
+    def get_motion_state(self, motion_ids, motion_times):
+        n = len(motion_ids)
+        num_bodies = self._get_num_bodies()
+        num_key_bodies = self._key_body_ids.shape[0]
+
+        root_pos0 = np.empty([n, 3])
+        root_pos1 = np.empty([n, 3])
+        root_rot0 = np.empty([n, 4])
+        root_rot1 = np.empty([n, 4])
+        root_vel = np.empty([n, 3])
+        root_ang_vel = np.empty([n, 3])
+        local_rot0 = np.empty([n, num_bodies])  # each dof dim 1
+        local_rot1 = np.empty([n, num_bodies])
+        dof_vel = np.empty([n, self._num_dof])
+        key_pos0 = np.empty([n, num_key_bodies, 3])
+        key_pos1 = np.empty([n, num_key_bodies, 3])
+
+        motion_len = self._motion_lengths[motion_ids]
+        num_frames = self._motion_num_frames[motion_ids]
+        dt = self._motion_dt[motion_ids]
+
+        frame_idx0, frame_idx1, blend = self._calc_frame_blend(motion_times, motion_len, num_frames, dt)
+
+        unique_ids = np.unique(motion_ids)
+        for uid in unique_ids:
+            ids = np.where(motion_ids == uid)
+
+            root_pos0[ids, :] = self._motions[uid][frame_idx0[ids], 0:3]
+            root_pos1[ids, :] = self._motions[uid][frame_idx1[ids], 0:3]
+
+            root_rot0[ids, :] = self._motions[uid][frame_idx0[ids], 3:7]
+            root_rot1[ids, :] = self._motions[uid][frame_idx1[ids], 3:7]
+
+            local_rot0[ids, :] = self._local_rots[uid][frame_idx0[ids], :]
+            local_rot1[ids, :] = self._local_rots[uid][frame_idx1[ids], :]
+
+            root_vel[ids, :] = (root_pos1[ids, :][0] - root_pos0[ids, :][0]) / dt[ids].reshape(-1, 1)
+
+            root_ang_vel[ids, :] = self._local_rotation_to_dof_vel(to_torch(root_rot0[ids, :][0], device=self._device),
+                                                                   to_torch(root_rot1[ids, :][0], device=self._device),
+                                                                   to_torch(dt[ids].reshape(-1, 1), device=self._device)
+                                                                   )
+
+            link_pos = self._key_body_pos[uid].reshape(num_frames[0], -1, 3)
+            key_pos0[ids, :, :] = link_pos[frame_idx0[ids][:, np.newaxis], self._key_body_ids[np.newaxis, :]]
+            key_pos1[ids, :, :] = link_pos[frame_idx1[ids][:, np.newaxis], self._key_body_ids[np.newaxis, :]]
+
+            dof_vel[ids, :] = self._dof_vels[uid][frame_idx0[ids]]
+
+        blend = to_torch(np.expand_dims(blend, axis=-1), device=self._device)
+
+        root_pos0 = to_torch(root_pos0, device=self._device)
+        root_pos1 = to_torch(root_pos1, device=self._device)
+        root_rot0 = to_torch(root_rot0, device=self._device)
+        root_rot1 = to_torch(root_rot1, device=self._device)
+        root_vel = to_torch(root_vel, device=self._device)
+        root_ang_vel = to_torch(root_ang_vel, device=self._device)
+        local_rot0 = to_torch(local_rot0, device=self._device)
+        local_rot1 = to_torch(local_rot1, device=self._device)
+        key_pos0 = to_torch(key_pos0, device=self._device)
+        key_pos1 = to_torch(key_pos1, device=self._device)
+        dof_vel = to_torch(dof_vel, device=self._device)
+
+        root_pos = (1.0 - blend) * root_pos0 + blend * root_pos1
+
+        root_rot = slerp(root_rot0, root_rot1, blend)
+
+        blend_exp = blend.unsqueeze(-1)
+        key_pos = (1.0 - blend_exp) * key_pos0 + blend_exp * key_pos1
+
+        dof_pos = (1.0 - blend) * local_rot0 + blend * local_rot1
+
+        return root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos
+
+    def _local_rotation_to_dof_vel(self, local_rot0, local_rot1, dt):
+        diff_quat_data = quat_mul_norm(local_rot1, quat_inverse(local_rot0))
+        diff_angle, diff_axis = quat_angle_axis(diff_quat_data)
+        local_vel = diff_axis * diff_angle.unsqueeze(-1) / dt
+        local_vel = local_vel.cpu().numpy()
+
+        return local_vel
+
+    def get_root_states(self):
+        return self._motions
+
+    def get_dof_pos(self):
+        return self._local_rots
+
+    def get_motion_num_frames(self, ids):
+        return self._motion_num_frames[ids]

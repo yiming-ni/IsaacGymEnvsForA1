@@ -92,7 +92,7 @@
     <child link="FR_hip"/>
     <axis xyz="1 0 0"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="20" lower="-0.802851455917" upper="0.802851455917" velocity="52.4"/>
+    <limit effort="35.5" lower="-0.802851455917" upper="0.802851455917" velocity="52.4"/>
   </joint>
   <link name="FR_hip">
     <visual>
@@ -134,7 +134,7 @@
     <child link="FR_thigh"/>
     <axis xyz="0 1 0"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="55" lower="-1.0471975512" upper="4.18879020479" velocity="28.6"/>
+    <limit effort="35.5" lower="-1.0471975512" upper="4.18879020479" velocity="28.6"/>
   </joint>
   <link name="FR_thigh">
     <visual>
@@ -162,7 +162,7 @@
     <child link="FR_calf"/>
     <axis xyz="0 1 0"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="55" lower="-2.69653369433" upper="-0.916297857297" velocity="28.6"/>
+    <limit effort="35.5" lower="-2.69653369433" upper="-0.916297857297" velocity="28.6"/>
   </joint>
   <link name="FR_calf">
     <visual>
@@ -214,7 +214,7 @@
     <child link="FL_hip"/>
     <axis xyz="1 0 0"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="20" lower="-0.802851455917" upper="0.802851455917" velocity="52.4"/>
+    <limit effort="35.5" lower="-0.802851455917" upper="0.802851455917" velocity="52.4"/>
   </joint>
   <link name="FL_hip">
     <visual>
@@ -256,7 +256,7 @@
     <child link="FL_thigh"/>
     <axis xyz="0 1 0"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="55" lower="-1.0471975512" upper="4.18879020479" velocity="28.6"/>
+    <limit effort="35.5" lower="-1.0471975512" upper="4.18879020479" velocity="28.6"/>
   </joint>
   <link name="FL_thigh">
     <visual>
@@ -284,7 +284,7 @@
     <child link="FL_calf"/>
     <axis xyz="0 1 0"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="55" lower="-2.69653369433" upper="-0.916297857297" velocity="28.6"/>
+    <limit effort="35.5" lower="-2.69653369433" upper="-0.916297857297" velocity="28.6"/>
   </joint>
   <link name="FL_calf">
     <visual>
@@ -336,7 +336,7 @@
     <child link="RR_hip"/>
     <axis xyz="1 0 0"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="20" lower="-0.802851455917" upper="0.802851455917" velocity="52.4"/>
+    <limit effort="35.5" lower="-0.802851455917" upper="0.802851455917" velocity="52.4"/>
   </joint>
   <link name="RR_hip">
     <visual>
@@ -378,7 +378,7 @@
     <child link="RR_thigh"/>
     <axis xyz="0 1 0"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="55" lower="-1.0471975512" upper="4.18879020479" velocity="28.6"/>
+    <limit effort="35.5" lower="-1.0471975512" upper="4.18879020479" velocity="28.6"/>
   </joint>
   <link name="RR_thigh">
     <visual>
@@ -406,7 +406,7 @@
     <child link="RR_calf"/>
     <axis xyz="0 1 0"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="55" lower="-2.69653369433" upper="-0.916297857297" velocity="28.6"/>
+    <limit effort="35.5" lower="-2.69653369433" upper="-0.916297857297" velocity="28.6"/>
   </joint>
   <link name="RR_calf">
     <visual>
@@ -458,7 +458,7 @@
     <child link="RL_hip"/>
     <axis xyz="1 0 0"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="20" lower="-0.802851455917" upper="0.802851455917" velocity="52.4"/>
+    <limit effort="35.5" lower="-0.802851455917" upper="0.802851455917" velocity="52.4"/>
   </joint>
   <link name="RL_hip">
     <visual>
@@ -500,7 +500,7 @@
     <child link="RL_thigh"/>
     <axis xyz="0 1 0"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="55" lower="-1.0471975512" upper="4.18879020479" velocity="28.6"/>
+    <limit effort="35.5" lower="-1.0471975512" upper="4.18879020479" velocity="28.6"/>
   </joint>
   <link name="RL_thigh">
     <visual>
@@ -528,7 +528,7 @@
     <child link="RL_calf"/>
     <axis xyz="0 1 0"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="55" lower="-2.69653369433" upper="-0.916297857297" velocity="28.6"/>
+    <limit effort="35.5" lower="-2.69653369433" upper="-0.916297857297" velocity="28.6"/>
   </joint>
   <link name="RL_calf">
     <visual>

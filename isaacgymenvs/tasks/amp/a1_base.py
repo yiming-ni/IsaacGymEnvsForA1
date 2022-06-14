@@ -37,6 +37,7 @@ from isaacgym.torch_utils import *
 
 from isaacgymenvs.utils.torch_jit_utils import *
 from ..base.vec_task import VecTask
+# from tensorboardX import SummaryWriter
 
 DOF_BODY_IDS = [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15]
 DOF_OFFSETS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
@@ -58,6 +59,9 @@ KEY_BODY_NAMES = ["FR_foot", "FL_foot", "RR_foot", "RL_foot"]
 class A1Base(VecTask):
 
     def __init__(self, config, sim_device, graphics_device_id, headless):
+        # self.writer = SummaryWriter()
+        # self.iter = 0
+        # self.pd_iter = 0
 
         self.cfg = config
 
@@ -110,8 +114,9 @@ class A1Base(VecTask):
         self._root_states = gymtorch.wrap_tensor(actor_root_state)
         self._initial_root_states = self._root_states.clone()
         self._initial_root_states[:] = 0
-        self._initial_root_states[..., 2] = 0.2676
+        self._initial_root_states[..., 2] = 0.269
         self._initial_root_states[..., 6] = 1
+        self._prev_root_states = self._root_states.clone()
 
         # create some wrapper tensors for different slices
         self._dof_state = gymtorch.wrap_tensor(dof_state_tensor)
@@ -524,12 +529,38 @@ class A1Base(VecTask):
         pd_tar = self._action_to_pd_targets(self.actions)
         for _ in range(self.control_freq_inv):
             self.torques = self._compute_torques(pd_tar).view(self.torques.shape)
+            # self.writer.add_scalar("torques/torque[0]", self.torques[0, 0], self.pd_iter)
+            # self.writer.add_scalar("torques/torque[1]", self.torques[0, 1], self.pd_iter)
+            # self.writer.add_scalar("torques/torque[2]", self.torques[0, 2], self.pd_iter)
+            # self.writer.add_scalar("torques/torque[3]", self.torques[0, 3], self.pd_iter)
+            # self.writer.add_scalar("torques/torque[4]", self.torques[0, 4], self.pd_iter)
+            # self.writer.add_scalar("torques/torque[5]", self.torques[0, 5], self.pd_iter)
+            # self.writer.add_scalar("torques/torque[6]", self.torques[0, 6], self.pd_iter)
+            # self.writer.add_scalar("torques/torque[7]", self.torques[0, 7], self.pd_iter)
+            # self.writer.add_scalar("torques/torque[8]", self.torques[0, 8], self.pd_iter)
+            # self.writer.add_scalar("torques/torque[9]", self.torques[0, 9], self.pd_iter)
+            # self.writer.add_scalar("torques/torque[10]", self.torques[0, 10], self.pd_iter)
+            # self.writer.add_scalar("torques/torque[11]", self.torques[0, 11], self.pd_iter)
+            # self.pd_iter += 1
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
             self.gym.simulate(self.sim)
             if self.device == 'cpu':
                 self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
 
+        # self.writer.add_scalar("actions/action[0]", pd_tar[0, 0], self.iter)
+        # self.writer.add_scalar("actions/action[1]", pd_tar[0, 1], self.iter)
+        # self.writer.add_scalar("actions/action[2]", pd_tar[0, 2], self.iter)
+        # self.writer.add_scalar("actions/action[3]", pd_tar[0, 3], self.iter)
+        # self.writer.add_scalar("actions/action[4]", pd_tar[0, 4], self.iter)
+        # self.writer.add_scalar("actions/action[5]", pd_tar[0, 5], self.iter)
+        # self.writer.add_scalar("actions/action[6]", pd_tar[0, 6], self.iter)
+        # self.writer.add_scalar("actions/action[7]", pd_tar[0, 7], self.iter)
+        # self.writer.add_scalar("actions/action[8]", pd_tar[0, 8], self.iter)
+        # self.writer.add_scalar("actions/action[9]", pd_tar[0, 9], self.iter)
+        # self.writer.add_scalar("actions/action[10]", pd_tar[0, 10], self.iter)
+        # self.writer.add_scalar("actions/action[11]", pd_tar[0, 11], self.iter)
+        # self.iter += 1
         # fill time out buffer
         self.timeout_buf = torch.where(self.progress_buf >= self.max_episode_length - 1,
                                        torch.ones_like(self.timeout_buf), torch.zeros_like(self.timeout_buf))
@@ -761,7 +792,7 @@ def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rig
         # first timestep can sometimes still have nonzero contact forces
         # so only check after first couple of steps
         has_fallen *= (progress_buf > 1)
-        terminated = torch.where(has_fallen, torch.ones_like(reset_buf), terminated)  # TODO: undo the mult 0
+        terminated = torch.where(has_fallen, torch.ones_like(reset_buf), terminated)
 
     reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), terminated)
 
@@ -773,37 +804,45 @@ class A1BaseTrial(A1Base):
         super.__init__()
 
     def post_physics_step(self):
-        self._prev_root_states = self._root_states.clone()
-        self.progress_buf += 1
-
-        self._refresh_sim_tensors()
-        self._compute_observations()
-        self._compute_reward(self.actions)
-        self._compute_reset()
-
-        self.extras["terminate"] = self._terminate_buf
-
-        # debug viz
-        if self.viewer and self.debug_viz:
-            self._update_debug_viz()
+        self._prev_root_states[..., :] = self._root_states
+        super().post_physics_step()
 
         return
 
     def _compute_reward(self, actions):
-        tar_speed = 100
-        vel_err_scale = 0.25
-        tangent_err_w = 0.1
-        root_pos = self._root_states[:, 0:3]
+        tar_speed = 2
         prev_root_pos = self._prev_root_states[:, 0:3]
-        delta_root_pos = root_pos - prev_root_pos
-        root_vel = delta_root_pos / self.dt
-        tar_dir_speed = root_vel[..., 0]
-        tangent_speed = root_vel[..., 1]
 
-        tar_vel_err = tar_speed - tar_dir_speed
-        tangent_vel_err = tangent_speed
-        dir_reward = torch.exp(-vel_err_scale * (tar_vel_err * tar_vel_err +
-                                                 tangent_err_w * tangent_vel_err * tangent_vel_err))
-
-        self.rew_buf[:] = dir_reward
+        self.rew_buf[:] = compute_trial_reward(self._root_states, prev_root_pos, tar_speed, self.dt)
+        # print('reward: ', self.rew_buf)
         return
+
+@torch.jit.script
+def compute_trial_reward(root_states, prev_root_pos, tar_speed, dt):
+    # type: (Tensor, Tensor, float, float) -> Tensor
+    vel_err_scale = 0.5
+    tangent_err_w = 0.1
+    roll_err_scale = 0.1
+    pitch_err_scale = 0.3
+    yaw_err_scale = 0.1
+    root_pos = root_states[:, 0:3]
+    root_rot = root_states[:, 3:7]
+
+    # root speed reward
+    delta_root_pos = root_pos - prev_root_pos
+    root_vel = delta_root_pos / dt
+    tar_dir_speed = root_vel[..., 0]
+    y_speed = root_vel[..., 1]
+    z_speed = root_vel[..., 2]
+
+    # root rotation reward
+    roll, pitch, yaw = get_euler_xyz(root_rot)
+
+    tar_vel_err = tar_speed - tar_dir_speed
+    dir_reward = torch.exp(- vel_err_scale * tar_vel_err * tar_vel_err -
+                           tangent_err_w * y_speed * y_speed -
+                           tangent_err_w * z_speed * z_speed -
+                           roll_err_scale * roll * roll -
+                           pitch_err_scale * pitch * pitch -
+                           yaw_err_scale * yaw * yaw)
+    return dir_reward
