@@ -34,7 +34,7 @@ env:
   #motion_file: "amp_humanoid_backflip.npy"
 
   asset:
-    assetFileName: "urdf/a1_original.urdf"
+    assetFileName: "urdf/a1_ig.urdf"
 
   plane:
     staticFriction: 1.0
