@@ -62,6 +62,7 @@ class A1AMP(A1Base):
         
         self._amp_obs_demo_buf = None
 
+        self._clock = 0
         self._num_motions = self._motion_lib.num_motions()
         self._motion_num_frames = self._motion_lib.get_motion_num_frames(0)  # TODO: length for motions might be different
 
@@ -279,20 +280,41 @@ class A1AMP(A1Base):
         self.actions = action_tensor.to(self.device).clone()
         # step physics and render each frame
         self.render()
-
-        for i in range(self._motion_num_frames):
-            curr_root_states = torch.zeros_like(self._initial_root_states)
-            curr_root_states[..., :7] = to_torch(self._motion_lib.get_root_states()[0][i, :], device=self.device)
-
-            curr_dof_state = torch.zeros_like(self._dof_state)
-            curr_dof_pos = torch.zeros(self.num_envs, self.num_dof)
-            curr_dof_pos[..., ...] = to_torch(self._motion_lib.get_dof_pos()[0][i, :], device=self.device)
-            curr_dof_state[..., 0] = curr_dof_pos.view(self.num_envs * self.num_dof,)
-
-            self.gym.set_actor_root_state_tensor(self.sim, gymtorch.unwrap_tensor(curr_root_states))
-            self.gym.set_dof_state_tensor(self.sim, gymtorch.unwrap_tensor(curr_dof_state))
-
+        self.gym.simulate(self.sim)
+        if self.device == 'cpu':
+            self.gym.fetch_results(self.sim, True)
+        self.gym.refresh_dof_state_tensor(self.sim)
         self.post_physics_step()
+
+        curr_time = self.progress_buf[0].cpu().numpy() * self.dt % self._motion_lib.get_motion_length(0)
+        motion_id = np.array([0])
+        root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos = self._motion_lib.get_motion_state(motion_id, curr_time)
+
+        # motion_id = self.progress_buf[0].cpu().numpy() // self._motion_num_frames
+        # if motion_id >= self._num_motions:
+        #     self._clock = 0
+        #     motion_id = self._clock // self._motion_num_frames
+
+        # frame_id = self._clock % self._motion_num_frames
+
+
+        self._root_states[..., :3] = root_pos
+        self._root_states[..., 3:7] = root_rot
+        self._root_states[..., 7:] = 0
+
+        self._dof_pos[..., :] = dof_pos
+        self._dof_vel[..., :] = 0
+        env_ids = torch.arange(0, self.num_envs, dtype=torch.int32, device=self.device)
+
+
+        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._root_states),
+                                             gymtorch.unwrap_tensor(env_ids), len(env_ids))
+        self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
+                                             gymtorch.unwrap_tensor(env_ids), len(env_ids))
+
+        self.timeout_buf = torch.where(self.progress_buf >= self.max_episode_length - 1,
+                                       torch.ones_like(self.timeout_buf), torch.zeros_like(self.timeout_buf))
+
 
         # randomize observations
         if self.dr_randomizations.get('observations', None):
