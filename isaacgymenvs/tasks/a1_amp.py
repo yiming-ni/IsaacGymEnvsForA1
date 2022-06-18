@@ -48,7 +48,7 @@ class A1AMP(A1Base):
 
         super().__init__(config=self.cfg, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless)
 
-        motion_file = cfg['env'].get('motion_file', "amp_humanoid_backflip.npy")
+        motion_file = cfg['env'].get('motion_file', "a1_ig_pace.json")
         motion_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../assets/amp/motions/" + motion_file)
         self._load_motion(motion_file_path)
 
@@ -246,10 +246,17 @@ class A1AMP(A1Base):
         self._dof_vel[env_ids] = dof_vel
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)
-        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._root_states), 
-                                                    gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
-        self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
-                                                    gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+        if self.add_markers:
+            actor_indices = self.all_actor_indices[env_ids, 0].flatten()  # TODO
+            self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
+                                                        gymtorch.unwrap_tensor(actor_indices), len(actor_indices))  #TODO self._root_states
+            self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
+                                                        gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
+        else:
+            self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._root_states),
+                                                         gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+            self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
+                                                  gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
         return
 
     def _update_hist_amp_obs(self, env_ids=None):
@@ -316,21 +323,6 @@ class TestMotion(A1AMP):
     def __init__(self, cfg, sim_device, graphics_device_id, headless):
         super().__init__(cfg, sim_device, graphics_device_id, headless)
 
-        marker_asset_options = gymapi.AssetOptions()
-        marker_asset_options.angular_damping = 0.0
-        marker_asset_options.max_angular_velocity = 4 * np.pi
-        marker_asset_options.slices_per_cylinder = 40
-
-        marker_asset_options.fix_base_link = True
-        marker_asset = self.gym.create_sphere(self.sim, 0.03, marker_asset_options)
-        init_marker_pos = gymapi.Transform()
-        init_marker_pos.p.z = 0.1
-
-        marker_handle_1 = self.gym.create_actor(self.envs[0], marker_asset, init_marker_pos, "marker-1", 0, 1, 1)
-        self.gym.set_rigid_body_color(self.envs[0], marker_handle_1, 0, gymapi.MESH_VISUAL_AND_COLLISION,
-                                      gymapi.Vec3(1, 0, 0))
-
-
     def step(self, actions):
 
         action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
@@ -347,21 +339,33 @@ class TestMotion(A1AMP):
         motion_id = np.array([0])
         root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos = self._motion_lib.get_motion_state(motion_id, curr_time)
 
-
-
         self._root_states[..., :3] = root_pos
         self._root_states[..., 3:7] = root_rot
         self._root_states[..., 7:] = 0
 
         self._dof_pos[..., :] = dof_pos
         self._dof_vel[..., :] = 0
-        env_ids = torch.arange(0, self.num_envs, dtype=torch.int32, device=self.device)
 
+        if self.add_markers:
+            self._marker_root_states[..., 0, :3] = key_pos[0][0]
+            self._marker_root_states[..., 1, :3] = key_pos[0][1]
+            self._marker_root_states[..., 2, :3] = key_pos[0][2]
+            self._marker_root_states[..., 3, :3] = key_pos[0][3]
 
-        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._root_states),
-                                             gymtorch.unwrap_tensor(env_ids), len(env_ids))
-        self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
-                                             gymtorch.unwrap_tensor(env_ids), len(env_ids))
+            env_ids = torch.arange(0, self.num_envs, device=self.device)  # TODO dtype=torch.int32
+
+            actor_indices = self.all_actor_indices[env_ids, 0] # TODO
+            all_actor_ids = self.all_actor_indices[:, :].flatten()
+            self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
+                                                 gymtorch.unwrap_tensor(actor_indices), len(actor_indices))  #TODO rootstates
+            self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
+                                                 gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
+        else:
+            env_ids = torch.arange(0, self.num_envs, device=self.device, dtype=torch.int32)
+            self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._root_states),
+                                                         gymtorch.unwrap_tensor(env_ids), len(env_ids))
+            self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
+                                                  gymtorch.unwrap_tensor(env_ids), len(env_ids))
 
         self.timeout_buf = torch.where(self.progress_buf >= self.max_episode_length - 1,
                                        torch.ones_like(self.timeout_buf), torch.zeros_like(self.timeout_buf))
