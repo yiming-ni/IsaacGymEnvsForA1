@@ -54,7 +54,7 @@ NUM_ACTIONS = 12
 # update obs
 
 KEY_BODY_NAMES = ["FR_foot", "FL_foot", "RR_foot", "RL_foot"]
-
+# "FR_foot", "FL_foot", "RR_foot", "RL_foot"
 
 class A1Base(VecTask):
 
@@ -84,11 +84,12 @@ class A1Base(VecTask):
         self.cfg["env"]["numObservations"] = self.get_obs_size()
         self.cfg["env"]["numActions"] = self.get_action_size()
 
+        # add marker if true
+        self.add_markers = self.cfg["env"].get("addMarkers", False)
+
         super().__init__(config=self.cfg, sim_device=sim_device, graphics_device_id=graphics_device_id,
                          headless=headless)
 
-        # self.device_type, self.device_id = gymutil.parse_device_str(self.sim_device)
-        # self.graphics_device_id = self.device_id if self.headless == False else -1
 
         dt = self.cfg["sim"]["dt"]
         self.dt = self.control_freq_inv * dt
@@ -111,7 +112,16 @@ class A1Base(VecTask):
         self.gym.refresh_rigid_body_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
 
-        self._root_states = gymtorch.wrap_tensor(actor_root_state)
+        if self.add_markers:
+            self.all_actor_indices = torch.arange(self.num_envs * (self.num_markers+1), dtype=torch.int32, device=self.device).reshape(
+                (self.num_envs, (self.num_markers+1)))  # TODO root_states
+            self._all_actor_root_states = gymtorch.wrap_tensor(actor_root_state)
+            self._root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 0, :]
+            self._marker_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 1:, :]
+        else:
+            self._root_states = gymtorch.wrap_tensor(actor_root_state)
+
+        # self._root_states = gymtorch.wrap_tensor(actor_root_state)
         self._initial_root_states = self._root_states.clone()
         self._initial_root_states[:] = 0
         self._initial_root_states[..., 2] = 0.269
@@ -146,19 +156,16 @@ class A1Base(VecTask):
         initial_dof = np.array([0, 0.9, -1.8] * 4)
         initial_dof = torch.tensor(initial_dof, device=self.device, dtype=torch.float)
         self._initial_dof_pos[..., :] = initial_dof
-        # right_shoulder_x_handle = self.gym.find_actor_dof_handle(self.envs[0], self.a1_handles[0], "right_shoulder_x")
-        # left_shoulder_x_handle = self.gym.find_actor_dof_handle(self.envs[0], self.a1_handles[0], "left_shoulder_x")
-        # self._initial_dof_pos[:, right_shoulder_x_handle] = 0.5 * np.pi
-        # self._initial_dof_pos[:, left_shoulder_x_handle] = -0.5 * np.pi
 
         self._initial_dof_vel = torch.zeros_like(self._dof_vel, device=self.device, dtype=torch.float)
 
         self._rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)
-        self._rigid_body_pos = self._rigid_body_state.view(self.num_envs, self.num_bodies, 13)[..., 0:3]
-        self._rigid_body_rot = self._rigid_body_state.view(self.num_envs, self.num_bodies, 13)[..., 3:7]
-        self._rigid_body_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies, 13)[..., 7:10]
-        self._rigid_body_ang_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies, 13)[..., 10:13]
-        self._contact_forces = gymtorch.wrap_tensor(contact_force_tensor).view(self.num_envs, self.num_bodies, 3)
+        self._rigid_body_pos = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[..., 0:3]   #TODO remove num_markers
+        self._rigid_body_rot = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[..., 3:7]
+        self._rigid_body_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[..., 7:10]
+        self._rigid_body_ang_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[..., 10:13]
+        self._contact_forces = gymtorch.wrap_tensor(contact_force_tensor).view(self.num_envs, self.num_bodies+self.num_markers, 3)
+
 
         self._terminate_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
 
@@ -276,6 +283,21 @@ class A1Base(VecTask):
         asset_options.thickness = self.cfg["asset"]["thickness"]
         asset_options.disable_gravity = self.cfg["asset"]["disable_gravity"]
 
+        # create marker options if add_markers is true
+        if self.add_markers:
+            marker_asset_options = gymapi.AssetOptions()
+            marker_asset_options.angular_damping = 0.0
+            marker_asset_options.max_angular_velocity = 4 * np.pi
+            marker_asset_options.slices_per_cylinder = 16
+
+            marker_asset_options.fix_base_link = True
+            marker_asset = self.gym.create_sphere(self.sim, 0.03, marker_asset_options)
+            init_marker_pos = gymapi.Transform()
+            init_marker_pos.p.z = 0.3
+            self.num_markers = 4
+        else:
+            self.num_markers = 0
+
         a1_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
 
         # actuator_props = self.gym.get_asset_actuator_properties(a1_asset)
@@ -299,9 +321,13 @@ class A1Base(VecTask):
         self.motor_efforts = to_torch(motor_efforts, device=self.device)
 
         self.torso_index = 0
-        # self.body_dict = self.gym.get_asset_rigid_body_names(a1_asset)
-        # ['base', 'FL_hip', 'FL_thigh', 'FL_calf', 'FL_foot', 'FR_hip', 'FR_thigh', 'FR_calf', 'FR_foot',
-        # 'RL_hip', 'RL_thigh', 'RL_calf', 'RL_foot', 'RR_hip', 'RR_thigh', 'RR_calf', 'RR_foot']
+        self.body_dict = self.gym.get_asset_rigid_body_names(a1_asset)
+        # ['base',
+        # 'FR_hip', 'FR_thigh', 'FR_calf', 'FR_foot',
+        # 'FL_hip', 'FL_thigh', 'FL_calf', 'FL_foot',
+        # 'RR_hip', 'RR_thigh', 'RR_calf', 'RR_foot',
+        # 'RL_hip', 'RL_thigh', 'RL_calf', 'RL_foot']
+
         self.dof_names = self.gym.get_asset_dof_names(a1_asset)
         self.num_bodies = self.gym.get_asset_rigid_body_count(a1_asset)
         self.num_dof = self.gym.get_asset_dof_count(a1_asset)
@@ -353,6 +379,21 @@ class A1Base(VecTask):
             contact_filter = 1
             handle = self.gym.create_actor(env_ptr, a1_asset, start_pose, "a1", i, contact_filter, 0)
 
+            # create markers
+            if self.add_markers:
+                marker_handle_0 = self.gym.create_actor(env_ptr, marker_asset, init_marker_pos, "marker-0", i, 1, 0)
+                marker_handle_1 = self.gym.create_actor(env_ptr, marker_asset, init_marker_pos, "marker-1", i, 1, 0)
+                marker_handle_2 = self.gym.create_actor(env_ptr, marker_asset, init_marker_pos, "marker-2", i, 1, 0)
+                marker_handle_3 = self.gym.create_actor(env_ptr, marker_asset, init_marker_pos, "marker-3", i, 1, 0)
+                self.gym.set_rigid_body_color(env_ptr, marker_handle_0, 0, gymapi.MESH_VISUAL_AND_COLLISION,
+                                              gymapi.Vec3(1, 0, 0))  # red
+                self.gym.set_rigid_body_color(env_ptr, marker_handle_1, 0, gymapi.MESH_VISUAL_AND_COLLISION,
+                                              gymapi.Vec3(0, 1, 0))  # green
+                self.gym.set_rigid_body_color(env_ptr, marker_handle_2, 0, gymapi.MESH_VISUAL_AND_COLLISION,
+                                              gymapi.Vec3(0, 0, 1))  # blue
+                self.gym.set_rigid_body_color(env_ptr, marker_handle_3, 0, gymapi.MESH_VISUAL_AND_COLLISION,
+                                              gymapi.Vec3(1, 1, 1))  # white
+
             self._process_dof_props(dof_props_asset, i)
 
             self.gym.enable_actor_dof_force_sensors(env_ptr, handle)
@@ -383,6 +424,7 @@ class A1Base(VecTask):
         self.dof_limits_upper = to_torch(self.dof_limits_upper, device=self.device)
 
         self._key_body_ids = self._build_key_body_ids_tensor(env_ptr, handle)
+        # [4, 8, 12, 16]
         self._contact_body_ids = self._build_contact_body_ids_tensor(env_ptr, handle)
 
         # if self._pd_control:
