@@ -23,7 +23,7 @@ from isaacgym.torch_utils import *
 from isaacgymenvs.utils.torch_jit_utils import *
 
 
-NUM_AMP_OBS_PER_STEP = 1 + 6 + 3 + 3 + 12 + 12 + 12  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
+NUM_AMP_OBS_PER_STEP = 1 + 6 + 3 + 3 + 12 + 12 + 4*3  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
 
 
 class A1AMP(A1Base):
@@ -347,10 +347,10 @@ class TestMotion(A1AMP):
         self._dof_vel[..., :] = 0
 
         if self.add_markers:
-            self._marker_root_states[..., 0, :3] = key_pos[0][0]
-            self._marker_root_states[..., 1, :3] = key_pos[0][1]
-            self._marker_root_states[..., 2, :3] = key_pos[0][2]
-            self._marker_root_states[..., 3, :3] = key_pos[0][3]
+            self._marker_root_states[..., 0, :3] = key_pos[0][12]
+            self._marker_root_states[..., 1, :3] = key_pos[0][13]
+            self._marker_root_states[..., 2, :3] = key_pos[0][14]
+            self._marker_root_states[..., 3, :3] = key_pos[0][15]
 
             env_ids = torch.arange(0, self.num_envs, device=self.device)  # TODO dtype=torch.int32
 

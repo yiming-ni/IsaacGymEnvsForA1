@@ -41,7 +41,7 @@ from ..base.vec_task import VecTask
 
 DOF_BODY_IDS = [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15]
 DOF_OFFSETS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-NUM_OBS = 1 + 6 + 3 + 3 + 12 + 12 + 12  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
+NUM_OBS = 1 + 6 + 3 + 3 + 12 + 12 + 4*3  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
 # base_height, base_orientation=4, base_angular_vel=3, joint_pos=12, joint_velocity=12
 # orientation, joint_pos, 4+12+history
 NUM_ACTIONS = 12
@@ -53,8 +53,11 @@ NUM_ACTIONS = 12
 #    actual joint pos, actual joint vel = update_data
 # update obs
 
+# KEY_BODY_NAMES = ["FR_foot", "FL_foot", "RR_foot", "RL_foot",
+#                   "FR_hip", "FL_hip", "RR_hip", "RL_hip",
+#                   "FR_thigh", "FL_thigh", "RR_thigh", "RL_thigh",
+#                   "FR_calf", "FL_calf", "RR_calf", "RL_calf"]
 KEY_BODY_NAMES = ["FR_foot", "FL_foot", "RR_foot", "RL_foot"]
-# "FR_foot", "FL_foot", "RR_foot", "RL_foot"
 
 class A1Base(VecTask):
 
@@ -306,16 +309,16 @@ class A1Base(VecTask):
         motor_efforts = [p.item() for p in dof_props_asset["effort"]]
 
         # create force sensors at the feet
-        rr_calf_idx = self.gym.find_asset_rigid_body_index(a1_asset, "RR_calf")
-        rl_calf_idx = self.gym.find_asset_rigid_body_index(a1_asset, "RL_calf")
-        fr_calf_idx = self.gym.find_asset_rigid_body_index(a1_asset, "FR_calf")
-        fl_calf_idx = self.gym.find_asset_rigid_body_index(a1_asset, "FL_calf")
+        rr_foot_idx = self.gym.find_asset_rigid_body_index(a1_asset, "RR_foot")
+        rl_foot_idx = self.gym.find_asset_rigid_body_index(a1_asset, "RL_foot")
+        fr_foot_idx = self.gym.find_asset_rigid_body_index(a1_asset, "FR_foot")
+        fl_foot_idx = self.gym.find_asset_rigid_body_index(a1_asset, "FL_foot")
         sensor_pose = gymapi.Transform()
 
-        self.gym.create_asset_force_sensor(a1_asset, rr_calf_idx, sensor_pose)
-        self.gym.create_asset_force_sensor(a1_asset, rl_calf_idx, sensor_pose)
-        self.gym.create_asset_force_sensor(a1_asset, fr_calf_idx, sensor_pose)
-        self.gym.create_asset_force_sensor(a1_asset, fl_calf_idx, sensor_pose)
+        self.gym.create_asset_force_sensor(a1_asset, rr_foot_idx, sensor_pose)
+        self.gym.create_asset_force_sensor(a1_asset, rl_foot_idx, sensor_pose)
+        self.gym.create_asset_force_sensor(a1_asset, fr_foot_idx, sensor_pose)
+        self.gym.create_asset_force_sensor(a1_asset, fl_foot_idx, sensor_pose)
 
         self.max_motor_effort = max(motor_efforts)
         self.motor_efforts = to_torch(motor_efforts, device=self.device)
