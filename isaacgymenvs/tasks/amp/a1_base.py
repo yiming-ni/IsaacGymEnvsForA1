@@ -53,10 +53,6 @@ NUM_ACTIONS = 12
 #    actual joint pos, actual joint vel = update_data
 # update obs
 
-# KEY_BODY_NAMES = ["FR_foot", "FL_foot", "RR_foot", "RL_foot",
-#                   "FR_hip", "FL_hip", "RR_hip", "RL_hip",
-#                   "FR_thigh", "FL_thigh", "RR_thigh", "RL_thigh",
-#                   "FR_calf", "FL_calf", "RR_calf", "RL_calf"]
 KEY_BODY_NAMES = ["FR_foot", "FL_foot", "RR_foot", "RL_foot"]
 
 class A1Base(VecTask):
@@ -127,7 +123,7 @@ class A1Base(VecTask):
         # self._root_states = gymtorch.wrap_tensor(actor_root_state)
         self._initial_root_states = self._root_states.clone()
         self._initial_root_states[:] = 0
-        self._initial_root_states[..., 2] = 0.269
+        self._initial_root_states[..., 2] = 0.35
         self._initial_root_states[..., 6] = 1
         self._prev_root_states = self._root_states.clone()
 
@@ -254,17 +250,16 @@ class A1Base(VecTask):
         plane_params.static_friction = self.plane_static_friction
         plane_params.dynamic_friction = self.plane_dynamic_friction
         plane_params.restitution = self.plane_restitution
+        # plane_params.distance = 2  #TODO only for testing ref
         self.gym.add_ground(self.sim, plane_params)
         return
 
     def _create_envs(self, num_envs, spacing, num_per_row):
         lower = gymapi.Vec3(-spacing, -spacing, 0.0)
         upper = gymapi.Vec3(spacing, spacing, spacing)
-        # lower = gymapi.Vec3(0., 0., 0.)
-        # upper = gymapi.Vec3(0., 0., 0.)
 
         asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../../assets')
-        asset_file = "urdf/a1_original.urdf"
+        asset_file = "urdf/a1_ig.urdf"
 
         if "asset" in self.cfg["env"]:
             # asset_root = self.cfg["env"]["asset"].get("assetRoot", asset_root)
@@ -341,7 +336,7 @@ class A1Base(VecTask):
         # start_pose.p = gymapi.Vec3(*get_axis_params(0.89, self.up_axis_idx))
         # start_pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
 
-        pos = [0.0, 0.0, 0.42]
+        pos = [0.0, 0.0, 0.35]
         rot = [0.0, 0.0, 0.0, 1.0]
         lin_vel = [0.0, 0.0, 0.0]
         ang_vel = [0.0, 0.0, 0.0]
@@ -375,9 +370,9 @@ class A1Base(VecTask):
                 self.sim, lower, upper, num_per_row
             )
 
-            pos = self.env_origins[i].clone()
-            pos[:2] += torch_rand_float(-1., 1., (2, 1), device=self.device).squeeze(1)
-            start_pose.p = gymapi.Vec3(*pos)
+            # pos = self.env_origins[i].clone()
+            # pos[:2] += torch_rand_float(-1., 1., (2, 1), device=self.device).squeeze(1)
+            # start_pose.p = gymapi.Vec3(*pos)
 
             contact_filter = 1
             handle = self.gym.create_actor(env_ptr, a1_asset, start_pose, "a1", i, contact_filter, 0)
