@@ -44,7 +44,7 @@ params:
   load_path: ${...checkpoint} # path to the checkpoint to load
 
   config:
-    name: ${resolve_default:A1AMP,${....experiment}}
+    name: ${resolve_default:TestHumanoidMotion,${....experiment}}
     full_experiment_name: ${.name}
     env_name: rlgpu
     ppo: True
@@ -63,7 +63,7 @@ params:
     lr_schedule: constant
     kl_threshold: 0.008
     score_to_win: 20000
-    max_epochs: ${resolve_default:5000,${....max_iterations}}
+    max_epochs: ${resolve_default:1000,${....max_iterations}}
     save_best_after: 100
     save_frequency: 50
     print_stats: True
@@ -71,8 +71,8 @@ params:
     entropy_coef: 0.0
     truncate_grads: False
     e_clip: 0.2
-    horizon_length: 16
-    minibatch_size: 32768
+    horizon_length: 128
+    minibatch_size: 4
     mini_epochs: 6
     critic_coef: 5
     clip_value: False
@@ -82,10 +82,10 @@ params:
     amp_replay_buffer_size: 1000000
     amp_replay_keep_prob: 0.01
     amp_batch_size: 512
-    amp_minibatch_size: 4096
+    amp_minibatch_size: 4
     disc_coef: 5
     disc_logit_reg: 0.05
-    disc_grad_penalty: 0.2
+    disc_grad_penalty: 5
     disc_reward_scale: 2
     disc_weight_decay: 0.0001
     normalize_amp_input: True
