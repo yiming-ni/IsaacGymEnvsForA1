@@ -458,11 +458,7 @@ class A1Base(VecTask):
                 lim_low[dof_offset] = curr_low
                 lim_high[dof_offset] = curr_high
 
-        self._pd_action_offset = 0.5 * (lim_high + lim_low)
-        self._pd_action_scale = 0.5 * (lim_high - lim_low)
-        # self._pd_action_offset = to_torch(self._pd_action_offset, device=self.device)
-        self._pd_action_offset = self._initial_dof_pos[0,...]
-        # self._pd_action_scale = to_torch(self._pd_action_scale, device=self.device)
+        self._pd_action_offset = self._initial_dof_pos[0, ...]
         lim_high = torch.tensor(lim_high, dtype=torch.float, device=self.device)
         lim_low = torch.tensor(lim_low, dtype=torch.float, device=self.device)
         self._pd_action_scale = torch.maximum(torch.abs(lim_high - self._pd_action_offset), torch.abs(lim_low - self._pd_action_offset))

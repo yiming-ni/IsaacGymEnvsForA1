@@ -105,6 +105,7 @@ class MotionLib():
         dt = self._motion_dt[motion_ids]
 
         frame_idx0, frame_idx1, blend = self._calc_frame_blend(motion_times, motion_len, num_frames, dt)
+        # print('frame0: {}, frame1{}'.format(frame_idx0, frame_idx1))
 
         unique_ids = np.unique(motion_ids)
         for uid in unique_ids:
@@ -432,7 +433,7 @@ class A1MotionLib(MotionLib):
         dt = self._motion_dt[motion_ids]
 
         frame_idx0, frame_idx1, blend = self._calc_frame_blend(motion_times, motion_len, num_frames, dt)
-
+        # print('frame 0: {} frame 1: {}'.format(frame_idx0, frame_idx1))
         unique_ids = np.unique(motion_ids)
         for uid in unique_ids:
             ids = np.where(motion_ids == uid)
@@ -446,11 +447,11 @@ class A1MotionLib(MotionLib):
             local_rot0[ids, :] = self._local_rots[uid][frame_idx0[ids], :]
             local_rot1[ids, :] = self._local_rots[uid][frame_idx1[ids], :]
 
-            root_vel[ids, :] = (root_pos1[ids, :][0] - root_pos0[ids, :][0]) / dt[ids].reshape(-1, 1)
+            root_vel[ids] = (root_pos1[ids] - root_pos0[ids]) / np.expand_dims(dt[ids], -1)
 
-            root_ang_vel[ids, :] = self._local_rotation_to_dof_vel(to_torch(root_rot0[ids, :][0], device=self._device),
-                                                                   to_torch(root_rot1[ids, :][0], device=self._device),
-                                                                   to_torch(dt[ids].reshape(-1, 1), device=self._device)
+            root_ang_vel[ids] = self._global_rotation_to_ang_vel(to_torch(root_rot0[ids], device=self._device),
+                                                                   to_torch(root_rot1[ids], device=self._device),
+                                                                   to_torch(np.expand_dims(dt[ids], -1), device=self._device)
                                                                    )
 
             link_pos = self._key_body_pos[uid].reshape(num_frames[0], -1, 3)
@@ -484,7 +485,7 @@ class A1MotionLib(MotionLib):
 
         return root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos
 
-    def _local_rotation_to_dof_vel(self, local_rot0, local_rot1, dt):
+    def _global_rotation_to_ang_vel(self, local_rot0, local_rot1, dt):
         diff_quat_data = quat_mul_norm(local_rot1, quat_inverse(local_rot0))
         diff_angle, diff_axis = quat_angle_axis(diff_quat_data)
         local_vel = diff_axis * diff_angle.unsqueeze(-1) / dt

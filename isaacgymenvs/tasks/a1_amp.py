@@ -112,6 +112,28 @@ class A1AMP(A1Base):
         amp_obs_demo_flat = self._amp_obs_demo_buf.view(-1, self.get_num_amp_obs())
         return amp_obs_demo_flat
 
+    def fetch_amp_obs_demo_time(self, motion_ids, motion_times0):
+        dt = self.dt
+
+        motion_ids = np.tile(np.expand_dims(motion_ids, axis=-1), [1, self._num_amp_obs_steps])
+        motion_times = np.expand_dims(motion_times0, axis=-1)
+        time_steps = -dt * np.arange(0, self._num_amp_obs_steps)
+        motion_times = motion_times + time_steps
+
+        motion_ids = motion_ids.flatten()
+        motion_times = motion_times.flatten()
+        root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos \
+            = self._motion_lib.get_motion_state(motion_ids, motion_times)
+        root_states = torch.cat([root_pos, root_rot, root_vel, root_ang_vel], dim=-1)
+        amp_obs_demo = build_amp_observations(root_states, dof_pos, dof_vel, key_pos,
+                                              self._local_root_obs)
+        amp_obs_buf = torch.zeros((self.num_envs, self._num_amp_obs_steps, NUM_AMP_OBS_PER_STEP),
+                                        device=self.device, dtype=torch.float)
+        amp_obs_buf[..., :, :] = amp_obs_demo
+
+        amp_obs_demo_flat = amp_obs_buf.view(-1, self.get_num_amp_obs())
+        return amp_obs_demo_flat
+
     def _build_amp_obs_demo_buf(self, num_samples):
         self._amp_obs_demo_buf = torch.zeros((num_samples, self._num_amp_obs_steps, NUM_AMP_OBS_PER_STEP), device=self.device, dtype=torch.float)
         return
@@ -174,7 +196,7 @@ class A1AMP(A1Base):
 
         root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos \
                = self._motion_lib.get_motion_state(motion_ids, motion_times)
-        
+
         self._set_env_state(env_ids=env_ids, 
                             root_pos=root_pos, 
                             root_rot=root_rot, 
@@ -247,9 +269,9 @@ class A1AMP(A1Base):
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         if self.add_markers:
-            actor_indices = self.all_actor_indices[env_ids, 0].flatten()  # TODO
+            actor_indices = self.all_actor_indices[env_ids, 0].flatten()
             self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
-                                                        gymtorch.unwrap_tensor(actor_indices), len(actor_indices))  #TODO self._root_states
+                                                        gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
             self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
                                                         gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
         else:
@@ -329,35 +351,52 @@ class TestMotion(A1AMP):
         self.actions = action_tensor.to(self.device).clone()
         # step physics and render each frame
         self.render()
-        self.gym.simulate(self.sim)
-        if self.device == 'cpu':
-            self.gym.fetch_results(self.sim, True)
-        self.gym.refresh_dof_state_tensor(self.sim)
-        self.post_physics_step()
+
+
 
         curr_time = self.progress_buf[0].cpu().numpy() * self.dt % self._motion_lib.get_motion_length(0)
+        try:
+            self.extras["prev_time"] = self.extras["curr_time"]
+        except Exception as e:
+            self.extras['prev_time'] = 0
+        self.extras["curr_time"] = curr_time
         motion_id = np.array([0])
+        self.extras['current_trans'] = self.fetch_amp_obs_demo_time(motion_id, self.extras['curr_time'])
         root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos = self._motion_lib.get_motion_state(motion_id, curr_time)
+        # key_pos[..., 2] += 2
 
         self._root_states[..., :3] = root_pos
+        # self._root_states[..., 2] += 2
         self._root_states[..., 3:7] = root_rot
-        self._root_states[..., 7:] = 0
+        self._root_states[..., 7:10] = root_vel
+        self._root_states[..., 10:13] = root_ang_vel
 
         self._dof_pos[..., :] = dof_pos
-        self._dof_vel[..., :] = 0
+        self._dof_vel[..., :] = dof_vel
+        if 'obs' in self.extras.keys():
+            hist_obs = self.extras['obs']
+        else:
+
+            hist_obs = None
+
+        self.extras['obs'] = build_amp_observations(self._root_states, self._dof_pos, self._dof_vel, key_pos, self._local_root_obs)
+        if hist_obs is not None:
+            self.extras['hist_obs'] = hist_obs
+        else:
+            self.extras['hist_obs'] = self.extras['obs']
 
         if self.add_markers:
-            self._marker_root_states[..., 0, :3] = key_pos[0][12]
-            self._marker_root_states[..., 1, :3] = key_pos[0][13]
-            self._marker_root_states[..., 2, :3] = key_pos[0][14]
-            self._marker_root_states[..., 3, :3] = key_pos[0][15]
+            self._marker_root_states[..., 0, :3] = key_pos[0][0]
+            self._marker_root_states[..., 1, :3] = key_pos[0][1]
+            self._marker_root_states[..., 2, :3] = key_pos[0][2]
+            self._marker_root_states[..., 3, :3] = key_pos[0][3]
 
-            env_ids = torch.arange(0, self.num_envs, device=self.device)  # TODO dtype=torch.int32
+            env_ids = torch.arange(0, self.num_envs, device=self.device)
 
-            actor_indices = self.all_actor_indices[env_ids, 0] # TODO
+            actor_indices = self.all_actor_indices[env_ids, 0]
             all_actor_ids = self.all_actor_indices[:, :].flatten()
             self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
-                                                 gymtorch.unwrap_tensor(actor_indices), len(actor_indices))  #TODO rootstates
+                                                 gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
             self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
                                                  gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
         else:
@@ -367,9 +406,15 @@ class TestMotion(A1AMP):
             self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
                                                   gymtorch.unwrap_tensor(env_ids), len(env_ids))
 
+        self.gym.simulate(self.sim)
+        if self.device == 'cpu':
+            self.gym.fetch_results(self.sim, True)
+        # self.gym.refresh_dof_state_tensor(self.sim)
+
         self.timeout_buf = torch.where(self.progress_buf >= self.max_episode_length - 1,
                                        torch.ones_like(self.timeout_buf), torch.zeros_like(self.timeout_buf))
 
+        self.post_physics_step()
 
         # randomize observations
         if self.dr_randomizations.get('observations', None):

@@ -35,7 +35,7 @@ from tasks.ball_balance import BallBalance
 from tasks.cartpole import Cartpole 
 from tasks.franka_cabinet import FrankaCabinet
 from tasks.humanoid import Humanoid
-from tasks.humanoid_amp import HumanoidAMP
+from tasks.humanoid_amp import HumanoidAMP, TestHumanoidMotion
 from tasks.ingenuity import Ingenuity
 from tasks.quadcopter import Quadcopter
 from tasks.shadow_hand import ShadowHand
@@ -61,5 +61,6 @@ isaacgym_task_map = {
     "A1AMP": A1AMP,
     "A1Base": A1Base,
     "A1BaseTrial": A1BaseTrial,
-    "TestMotion": TestMotion
+    "TestMotion": TestMotion,
+    "TestHumanoidMotion": TestHumanoidMotion
 }

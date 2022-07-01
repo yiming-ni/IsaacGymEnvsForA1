@@ -112,6 +112,28 @@ class HumanoidAMP(HumanoidAMPBase):
         amp_obs_demo_flat = self._amp_obs_demo_buf.view(-1, self.get_num_amp_obs())
         return amp_obs_demo_flat
 
+    def fetch_amp_obs_demo_time(self, motion_ids, motion_times0):
+        dt = self.dt
+
+        motion_ids = np.tile(np.expand_dims(motion_ids, axis=-1), [1, self._num_amp_obs_steps])
+        motion_times = np.expand_dims(motion_times0, axis=-1)
+        time_steps = -dt * np.arange(0, self._num_amp_obs_steps)
+        motion_times = motion_times + time_steps
+
+        motion_ids = motion_ids.flatten()
+        motion_times = motion_times.flatten()
+        root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos \
+            = self._motion_lib.get_motion_state(motion_ids, motion_times)
+        root_states = torch.cat([root_pos, root_rot, root_vel, root_ang_vel], dim=-1)
+        amp_obs_demo = build_amp_observations(root_states, dof_pos, dof_vel, key_pos,
+                                              self._local_root_obs)
+        amp_obs_buf = torch.zeros((self.num_envs, self._num_amp_obs_steps, NUM_AMP_OBS_PER_STEP),
+                                        device=self.device, dtype=torch.float)
+        amp_obs_buf[..., :, :] = amp_obs_demo
+
+        amp_obs_demo_flat = amp_obs_buf.view(-1, self.get_num_amp_obs())
+        return amp_obs_demo_flat
+
     def _build_amp_obs_demo_buf(self, num_samples):
         self._amp_obs_demo_buf = torch.zeros((num_samples, self._num_amp_obs_steps, NUM_AMP_OBS_PER_STEP), device=self.device, dtype=torch.float)
         return
@@ -310,3 +332,63 @@ def build_amp_observations(root_states, dof_pos, dof_vel, key_body_pos, local_ro
 
     obs = torch.cat((root_h, root_rot_obs, local_root_vel, local_root_ang_vel, dof_obs, dof_vel, flat_local_key_pos), dim=-1)
     return obs
+
+
+class TestHumanoidMotion(HumanoidAMP):
+    def __init__(self, cfg, sim_device, graphics_device_id, headless):
+        super().__init__(cfg, sim_device, graphics_device_id, headless)
+
+    def step(self, actions):
+        action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
+        self.actions = action_tensor.to(self.device).clone()
+        # step physics and render each frame
+        self.render()
+
+        curr_time = self.progress_buf[0].cpu().numpy() * self.dt % self._motion_lib.get_motion_length(0)
+        try:
+            self.extras["prev_time"] = self.extras["curr_time"]
+        except Exception as e:
+            self.extras['prev_time'] = 0
+        self.extras["curr_time"] = curr_time
+        motion_id = np.array([0])
+        self.extras['current_trans'] = self.fetch_amp_obs_demo_time(motion_id, self.extras['curr_time'])
+        root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos = self._motion_lib.get_motion_state(
+            motion_id, curr_time)
+
+        self._root_states[..., :3] = root_pos
+        self._root_states[..., 3:7] = root_rot
+        self._root_states[..., 7:10] = root_vel
+        self._root_states[..., 10:13] = root_ang_vel
+
+        self._dof_pos[..., :] = dof_pos
+        self._dof_vel[..., :] = dof_vel
+
+        env_ids = torch.arange(0, self.num_envs, device=self.device, dtype=torch.int32)
+        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._root_states),
+                                                     gymtorch.unwrap_tensor(env_ids), len(env_ids))
+        self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
+                                              gymtorch.unwrap_tensor(env_ids), len(env_ids))
+
+        self.gym.simulate(self.sim)
+        if self.device == 'cpu':
+            self.gym.fetch_results(self.sim, True)
+        self.gym.refresh_dof_state_tensor(self.sim)
+
+        self.timeout_buf = torch.where(self.progress_buf >= self.max_episode_length - 1,
+                                       torch.ones_like(self.timeout_buf), torch.zeros_like(self.timeout_buf))
+
+        self.post_physics_step()
+
+        # randomize observations
+        if self.dr_randomizations.get('observations', None):
+            self.obs_buf = self.dr_randomizations['observations']['noise_lambda'](self.obs_buf)
+
+        self.extras["time_outs"] = self.timeout_buf.to(self.rl_device)
+
+        self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+
+        # asymmetric actor-critic
+        if self.num_states > 0:
+            self.obs_dict["states"] = self.get_state()
+
+        return self.obs_dict, self.rew_buf.to(self.rl_device), self.reset_buf.to(self.rl_device), self.extras

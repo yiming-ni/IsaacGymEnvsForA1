@@ -39,7 +39,7 @@ class AMPPlayerContinuous(common_player.CommonPlayer):
     def __init__(self, config):
         self._normalize_amp_input = config.get('normalize_amp_input', True)
         self._disc_reward_scale = config['disc_reward_scale']
-        self._print_disc_prediction = config.get('print_disc_prediction', False)
+        self._print_disc_prediction = config.get('print_disc_prediction', False)  # TODO: turn False
         
         super().__init__(config)
         return
@@ -79,13 +79,23 @@ class AMPPlayerContinuous(common_player.CommonPlayer):
         with torch.no_grad():
             amp_obs = info['amp_obs']
             amp_obs = amp_obs[0:1]
+            obs = info['obs']
+            obs = obs[0:1]
+            hist_obs = info['hist_obs'][0:1]
+            full_obs = torch.cat([obs, hist_obs], dim=-1)
+            # direct_obs = info['current_trans'][0:1]
             disc_pred = self._eval_disc(amp_obs.to(self.device))
+            pred = self._eval_disc(full_obs.to(self.device))
             amp_rewards = self._calc_amp_rewards(amp_obs.to(self.device))
             disc_reward = amp_rewards['disc_rewards']
 
             disc_pred = disc_pred.detach().cpu().numpy()[0, 0]
+            # if disc_pred.item() > 0:
+            #     print("time_diff: ", info['prev_time'], info['curr_time'])
+            # print("demo_obs: ", info['current_trans'])
+            # print('sim trans: ', info['amp_obs'])
             disc_reward = disc_reward.cpu().numpy()[0, 0]
-            print("disc_pred: ", disc_pred, disc_reward)
+            print("disc_pred: ", disc_pred, disc_reward, '\ndirect_pred: ', pred)
 
         return
 
