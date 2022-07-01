@@ -462,6 +462,7 @@ class A1Base(VecTask):
         lim_high = torch.tensor(lim_high, dtype=torch.float, device=self.device)
         lim_low = torch.tensor(lim_low, dtype=torch.float, device=self.device)
         self._pd_action_scale = torch.maximum(torch.abs(lim_high - self._pd_action_offset), torch.abs(lim_low - self._pd_action_offset))
+        self._pd_action_scale = torch.clamp_max(self._pd_action_scale, torch.pi)
 
         return
 

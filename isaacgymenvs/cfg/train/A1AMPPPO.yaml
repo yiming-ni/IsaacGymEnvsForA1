@@ -16,7 +16,9 @@ params:
         mu_activation: None
         sigma_activation: None
         mu_init:
-          name: default
+          name: random_uniform_initializer  # default
+          a: -0.01
+          b: 0.01
         sigma_init:
           name: const_initializer
           val: -2.9
@@ -59,7 +61,7 @@ params:
     normalize_advantage: True
     gamma: 0.99
     tau: 0.95
-    learning_rate: 5e-5
+    learning_rate: 5e-5  #1e-4
     lr_schedule: constant
     kl_threshold: 0.008
     score_to_win: 20000
@@ -71,8 +73,8 @@ params:
     entropy_coef: 0.0
     truncate_grads: False
     e_clip: 0.2
-    horizon_length: 16
-    minibatch_size: 32768
+    horizon_length: 1248 # 16
+    minibatch_size: 4 # 32768
     mini_epochs: 6
     critic_coef: 5
     clip_value: False
@@ -82,10 +84,10 @@ params:
     amp_replay_buffer_size: 1000000
     amp_replay_keep_prob: 0.01
     amp_batch_size: 512
-    amp_minibatch_size: 4096
+    amp_minibatch_size: 4  # 4096
     disc_coef: 5
     disc_logit_reg: 0.05
-    disc_grad_penalty: 0.2
+    disc_grad_penalty: 1
     disc_reward_scale: 2
     disc_weight_decay: 0.0001
     normalize_amp_input: True
