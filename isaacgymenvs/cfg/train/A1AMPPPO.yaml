@@ -66,8 +66,8 @@ params:
     kl_threshold: 0.008
     score_to_win: 20000
     max_epochs: ${resolve_default:5000,${....max_iterations}}
-    save_best_after: 100
-    save_frequency: 50
+    save_best_after: 500
+    save_frequency: 100
     print_stats: True
     grad_norm: 1.0
     entropy_coef: 0.0
@@ -87,7 +87,7 @@ params:
     amp_minibatch_size: 4096  # 4
     disc_coef: 5
     disc_logit_reg: 0.05
-    disc_grad_penalty: 1
+    disc_grad_penalty: 2
     disc_reward_scale: 2
     disc_weight_decay: 0.0001
     normalize_amp_input: True
