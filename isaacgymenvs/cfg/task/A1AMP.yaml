@@ -25,7 +25,8 @@ env:
 
   # animation files to learn from
   # these motions should use hyperparameters from HumanoidAMPPPO.yaml
-  motion_file: "a1_ig_ofstv1_pace.json"
+#  motion_file: "a1_ig_ofstv1_pace.json"
+  motion_file: "a1_ig_ofstv1_trot.json"
   #motion_file: "amp_humanoid_run.npy"
   #motion_file: "amp_humanoid_dance.npy"
 
@@ -35,6 +36,7 @@ env:
 
   asset:
     assetFileName: "urdf/a1_ig.urdf"
+#    assetFileName: "mjcf/a1_test.xml"
 
   plane:
     staticFriction: 1.0
