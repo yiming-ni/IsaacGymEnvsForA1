@@ -21,7 +21,7 @@ params:
           b: 0.01
         sigma_init:
           name: const_initializer
-          val: -2.9
+          val: -3.2
         fixed_sigma: True
         learn_sigma: False
 
@@ -61,7 +61,7 @@ params:
     normalize_advantage: True
     gamma: 0.99
     tau: 0.95
-    learning_rate: 5e-4  #5e-5
+    learning_rate: 0.001  #5e-5
     lr_schedule: constant
     kl_threshold: 0.008
     score_to_win: 20000
