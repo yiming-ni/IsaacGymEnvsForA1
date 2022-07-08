@@ -266,7 +266,6 @@ class A1Base(VecTask):
         asset_file = "urdf/a1_ig.urdf"
 
         if "asset" in self.cfg["env"]:
-            # asset_root = self.cfg["env"]["asset"].get("assetRoot", asset_root)
             asset_file = self.cfg["env"]["asset"].get("assetFileName", asset_file)
 
         asset_options = gymapi.AssetOptions()
@@ -304,6 +303,7 @@ class A1Base(VecTask):
 
         # actuator_props = self.gym.get_asset_actuator_properties(a1_asset)
         # motor_efforts = [prop.motor_effort for prop in actuator_props]
+        # TODO above for actuator
         dof_props_asset = self.gym.get_asset_dof_properties(a1_asset)
         motor_efforts = [p.item() for p in dof_props_asset["effort"]]
 
@@ -396,6 +396,7 @@ class A1Base(VecTask):
                 self.gym.set_rigid_body_color(env_ptr, marker_handle_3, 0, gymapi.MESH_VISUAL_AND_COLLISION,
                                               gymapi.Vec3(1, 1, 1))  # white
 
+            # TODO below for computing torque limits
             self._process_dof_props(dof_props_asset, i)
 
             self.gym.enable_actor_dof_force_sensors(env_ptr, handle)
@@ -409,7 +410,7 @@ class A1Base(VecTask):
 
             if (self._pd_control):
                 dof_prop = self.gym.get_asset_dof_properties(a1_asset)
-                dof_prop["driveMode"] = gymapi.DOF_MODE_EFFORT  # changed from DOF_MODE_POS
+                dof_prop["driveMode"] = gymapi.DOF_MODE_EFFORT  # TODO DOF_MODE_POS for actuator, EFFORT for dof
                 self.gym.set_actor_dof_properties(env_ptr, handle, dof_prop)
 
         dof_prop = self.gym.get_actor_dof_properties(env_ptr, handle)
@@ -559,6 +560,7 @@ class A1Base(VecTask):
         # return torques
         return torch.clip(torques, -self.torque_limits, self.torque_limits)
 
+    # TODO for manual pd control
     def step(self, actions):
         if self.dr_randomizations.get('actions', None):
             actions = self.dr_randomizations['actions']['noise_lambda'](actions)
@@ -635,10 +637,8 @@ class A1Base(VecTask):
 
         if (self._pd_control):
             pd_tar = self._action_to_pd_targets(self.actions)
-            # pd_tar_tensor = gymtorch.unwrap_tensor(pd_tar)
-            # self.gym.set_dof_position_target_tensor(self.sim, pd_tar_tensor)
-            self.torques = self._compute_torques(pd_tar).view(self.torques.shape)
-            self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
+            pd_tar_tensor = gymtorch.unwrap_tensor(pd_tar)
+            self.gym.set_dof_position_target_tensor(self.sim, pd_tar_tensor)
 
         else:
             forces = self.actions * self.motor_efforts.unsqueeze(0) * self.power_scale
@@ -693,12 +693,6 @@ class A1Base(VecTask):
     def _action_to_pd_targets(self, action):
         pd_tar = self._pd_action_offset + self._pd_action_scale * action
         return pd_tar
-
-    # Below is an alternate solution for normalization
-    # def _action_to_pd_targets(self, action):
-    #     """tanh normalization"""
-    #     pd_tar = (self.dof_pos_limits[:,0] + (action + 1) / 2.0 * (self.dof_pos_limits[:,1] - self.dof_pos_limits[:,0]))
-    #     return pd_tar
 
     def _init_camera(self):
         self.gym.refresh_actor_root_state_tensor(self.sim)
