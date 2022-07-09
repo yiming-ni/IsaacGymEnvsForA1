@@ -122,7 +122,10 @@ class A1Base(VecTask):
             self._root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 0, :]
             self._marker_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 1:, :]
         else:
-            self._root_states = gymtorch.wrap_tensor(actor_root_state)
+            self._all_actor_root_states = gymtorch.wrap_tensor(actor_root_state)
+            self._root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 0, :]
+            self._goal_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 1:, :]
+            self._goal_pos = self._goal_root_states[..., :2]
 
         # self._root_states = gymtorch.wrap_tensor(actor_root_state)
         self._initial_root_states = self._root_states.clone()
@@ -297,7 +300,12 @@ class A1Base(VecTask):
             init_marker_pos.p.z = 0.3
             self.num_markers = 4
         else:
-            self.num_markers = 0
+            goal_asset_opts = gymapi.AssetOptions()
+            goal_asset_opts.fix_base_link = True
+            goal_asset = self.gym.create_sphere(self.sim, 0.03, goal_asset_opts)
+            init_goal_pos = gymapi.Transform()
+            init_goal_pos.p.z = 0.2
+            self.num_markers = 1  # TODO for goal pos
 
         a1_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
 
@@ -380,6 +388,9 @@ class A1Base(VecTask):
 
             contact_filter = 1
             handle = self.gym.create_actor(env_ptr, a1_asset, start_pose, "a1", i, contact_filter, 0)
+
+            goal_handle = self.gym.create_actor(env_ptr, goal_asset, init_goal_pos, "goal", i, 1, 0)
+            self.gym.set_rigid_body_color(env_ptr, goal_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(1, 0, 0))
 
             # create markers
             if self.add_markers:
@@ -516,7 +527,7 @@ class A1Base(VecTask):
             key_body_pos = self._rigid_body_pos[env_ids][:, self._key_body_ids, :]
 
         obs = compute_a1_observations(root_states, dof_pos, dof_vel,
-                                      key_body_pos, self._local_root_obs)
+                                      key_body_pos, self._local_root_obs, self._goal_pos)
 
         return obs
 
@@ -572,38 +583,12 @@ class A1Base(VecTask):
         pd_tar = self._action_to_pd_targets(self.actions)
         for _ in range(self.control_freq_inv):
             self.torques = self._compute_torques(pd_tar).view(self.torques.shape)
-            # self.writer.add_scalar("torques/torque[0]", self.torques[0, 0], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[1]", self.torques[0, 1], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[2]", self.torques[0, 2], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[3]", self.torques[0, 3], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[4]", self.torques[0, 4], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[5]", self.torques[0, 5], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[6]", self.torques[0, 6], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[7]", self.torques[0, 7], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[8]", self.torques[0, 8], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[9]", self.torques[0, 9], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[10]", self.torques[0, 10], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[11]", self.torques[0, 11], self.pd_iter)
-            # self.pd_iter += 1
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
             self.gym.simulate(self.sim)
             if self.device == 'cpu':
                 self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
 
-        # self.writer.add_scalar("actions/action[0]", pd_tar[0, 0], self.iter)
-        # self.writer.add_scalar("actions/action[1]", pd_tar[0, 1], self.iter)
-        # self.writer.add_scalar("actions/action[2]", pd_tar[0, 2], self.iter)
-        # self.writer.add_scalar("actions/action[3]", pd_tar[0, 3], self.iter)
-        # self.writer.add_scalar("actions/action[4]", pd_tar[0, 4], self.iter)
-        # self.writer.add_scalar("actions/action[5]", pd_tar[0, 5], self.iter)
-        # self.writer.add_scalar("actions/action[6]", pd_tar[0, 6], self.iter)
-        # self.writer.add_scalar("actions/action[7]", pd_tar[0, 7], self.iter)
-        # self.writer.add_scalar("actions/action[8]", pd_tar[0, 8], self.iter)
-        # self.writer.add_scalar("actions/action[9]", pd_tar[0, 9], self.iter)
-        # self.writer.add_scalar("actions/action[10]", pd_tar[0, 10], self.iter)
-        # self.writer.add_scalar("actions/action[11]", pd_tar[0, 11], self.iter)
-        # self.iter += 1
         # fill time out buffer
         self.timeout_buf = torch.where(self.progress_buf >= self.max_episode_length - 1,
                                        torch.ones_like(self.timeout_buf), torch.zeros_like(self.timeout_buf))
@@ -766,7 +751,7 @@ def dof_to_obs(pose):
 
 
 @torch.jit.script
-def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_root_obs):
+def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_root_obs, goal_pos):
     # type: (Tensor, Tensor, Tensor, Tensor, bool) -> Tensor
     root_pos = root_states[:, 0:3]
     root_rot = root_states[:, 3:7]
@@ -797,6 +782,9 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
     local_end_pos = my_quat_rotate(flat_heading_rot, flat_end_pos)
     flat_local_key_pos = local_end_pos.view(local_key_body_pos.shape[0],
                                             local_key_body_pos.shape[1] * local_key_body_pos.shape[2])
+
+    root_xy_expand = root_pos[:, :2].unsqueeze(-1)
+    local_goal_pos = goal_pos - root
 
     dof_obs = dof_to_obs(dof_pos)
 
