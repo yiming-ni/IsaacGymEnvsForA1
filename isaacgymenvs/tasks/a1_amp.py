@@ -268,17 +268,17 @@ class A1AMP(A1Base):
         self._dof_vel[env_ids] = dof_vel
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)
+        actor_indices = self.all_actor_indices[env_ids, 0].flatten()
         if self.add_markers:
-            actor_indices = self.all_actor_indices[env_ids, 0].flatten()
             self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
                                                         gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
             self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
                                                         gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
         else:
-            self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._root_states),
-                                                         gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+            self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
+                                                         gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
             self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
-                                                  gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+                                                  gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
         return
 
     def _update_hist_amp_obs(self, env_ids=None):
