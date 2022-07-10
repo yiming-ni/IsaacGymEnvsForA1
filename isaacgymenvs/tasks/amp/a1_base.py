@@ -30,6 +30,7 @@
 import numpy as np
 import os
 import torch
+import random
 
 from isaacgym import gymtorch
 from isaacgym import gymapi, gymutil
@@ -42,7 +43,7 @@ from ..base.observation_buffer import ObservationBuffer
 
 DOF_BODY_IDS = [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15]
 DOF_OFFSETS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-NUM_OBS = 1 + 6 + 3 + 3 + 12 + 12 + 4*3  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
+NUM_OBS = 1 + 6 + 3 + 3 + 12 + 12 + 4*3 + 2  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, local_key_body_pos, local_goal_xy]
 # base_height, base_orientation=4, base_angular_vel=3, joint_pos=12, joint_velocity=12
 # orientation, joint_pos, 4+12+history
 NUM_ACTIONS = 12
@@ -119,10 +120,13 @@ class A1Base(VecTask):
             self._root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 0, :]
             self._marker_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 1:, :]
         else:
+            self.all_actor_indices = torch.arange(self.num_envs * (self.num_markers+1), dtype=torch.int32, device=self.device).reshape(
+                (self.num_envs, (self.num_markers+1))
+            )
             self._all_actor_root_states = gymtorch.wrap_tensor(actor_root_state)
             self._root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 0, :]
             self._goal_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 1:, :]
-            self._goal_pos = self._goal_root_states[..., :2]
+            self._goal_pos = self._goal_root_states[..., :3]
 
         # self._root_states = gymtorch.wrap_tensor(actor_root_state)
         self._initial_root_states = self._root_states.clone()
@@ -305,7 +309,6 @@ class A1Base(VecTask):
             goal_asset_opts.fix_base_link = True
             goal_asset = self.gym.create_sphere(self.sim, 0.03, goal_asset_opts)
             init_goal_pos = gymapi.Transform()
-            init_goal_pos.p.z = 0.2
             self.num_markers = 1  # TODO for goal pos
 
         a1_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
@@ -390,6 +393,9 @@ class A1Base(VecTask):
             contact_filter = 1
             handle = self.gym.create_actor(env_ptr, a1_asset, start_pose, "a1", i, contact_filter, 0)
 
+            init_goal_pos.p.x = random.randrange(10, 15, 1)
+            init_goal_pos.p.y = random.randrange(5, 10, 1)
+            init_goal_pos.p.z = 0.2
             goal_handle = self.gym.create_actor(env_ptr, goal_asset, init_goal_pos, "goal", i, 1, 0)
             self.gym.set_rigid_body_color(env_ptr, goal_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(1, 0, 0))
 
@@ -517,14 +523,16 @@ class A1Base(VecTask):
             dof_pos = self._dof_pos
             dof_vel = self._dof_vel
             key_body_pos = self._rigid_body_pos[:, self._key_body_ids, :]
+            goal_pos = self._goal_pos
         else:
             root_states = self._root_states[env_ids]
             dof_pos = self._dof_pos[env_ids]
             dof_vel = self._dof_vel[env_ids]
             key_body_pos = self._rigid_body_pos[env_ids][:, self._key_body_ids, :]
+            goal_pos = self._goal_pos[env_ids]
 
         obs = compute_a1_observations(root_states, dof_pos, dof_vel,
-                                      key_body_pos, self._local_root_obs, self._goal_pos)
+                                      key_body_pos, self._local_root_obs, goal_pos)
 
         return obs
 
@@ -748,7 +756,7 @@ def dof_to_obs(pose):
 
 @torch.jit.script
 def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_root_obs, goal_pos):
-    # type: (Tensor, Tensor, Tensor, Tensor, bool) -> Tensor
+    # type: (Tensor, Tensor, Tensor, Tensor, bool, Tensor) -> Tensor
     root_pos = root_states[:, 0:3]
     root_rot = root_states[:, 3:7]
     root_vel = root_states[:, 7:10]
@@ -770,21 +778,28 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
     local_key_body_pos = key_body_pos - root_pos_expand
 
     heading_rot_expand = heading_rot.unsqueeze(-2)
-    heading_rot_expand = heading_rot_expand.repeat((1, local_key_body_pos.shape[1], 1))
+    heading_rot_expand_for_key_body = heading_rot_expand.repeat((1, local_key_body_pos.shape[1], 1))
     flat_end_pos = local_key_body_pos.view(local_key_body_pos.shape[0] * local_key_body_pos.shape[1],
                                            local_key_body_pos.shape[2])
-    flat_heading_rot = heading_rot_expand.view(heading_rot_expand.shape[0] * heading_rot_expand.shape[1],
-                                               heading_rot_expand.shape[2])
+    flat_heading_rot = heading_rot_expand_for_key_body.view(heading_rot_expand_for_key_body.shape[0] * heading_rot_expand_for_key_body.shape[1],
+                                               heading_rot_expand_for_key_body.shape[2])
     local_end_pos = my_quat_rotate(flat_heading_rot, flat_end_pos)
     flat_local_key_pos = local_end_pos.view(local_key_body_pos.shape[0],
                                             local_key_body_pos.shape[1] * local_key_body_pos.shape[2])
 
-    root_xy_expand = root_pos[:, :2].unsqueeze(-1)
-    local_goal_pos = goal_pos - root
+    root_pos_expand = root_pos.unsqueeze(-2)
+    local_goal_pos = goal_pos - root_pos_expand
+    heading_rot_expand_for_goal = heading_rot_expand.repeat((1, local_goal_pos.shape[1], 1))
+    flat_goal_pos = local_goal_pos.view(local_goal_pos.shape[0] * local_goal_pos.shape[1], local_goal_pos.shape[2])
+    flat_heading_rot_for_goal = heading_rot_expand_for_goal.view(heading_rot_expand_for_goal.shape[0] * heading_rot_expand_for_goal.shape[1],
+                                                                 heading_rot_expand_for_goal.shape[2])
+    local_target_pos = my_quat_rotate(flat_heading_rot_for_goal, flat_goal_pos)
+    flat_local_goal_xy = local_target_pos[:, :2]
 
     dof_obs = dof_to_obs(dof_pos)
 
-    obs = torch.cat((root_h, root_rot_obs, local_root_vel, local_root_ang_vel, dof_obs, dof_vel, flat_local_key_pos),
+    obs = torch.cat((root_h, root_rot_obs, local_root_vel, local_root_ang_vel, dof_obs, dof_vel, flat_local_key_pos,
+                     flat_local_goal_xy),
                     dim=-1)
     return obs
 
@@ -792,7 +807,12 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
 @torch.jit.script
 def compute_a1_reward(obs_buf):
     # type: (Tensor) -> Tensor
-    reward = torch.ones_like(obs_buf[:, 0])
+    # without task reward
+    # reward = torch.ones_like(obs_buf[:, 0])
+
+    goal_x = obs_buf[:, -2]
+    goal_y = obs_buf[:, -1]
+    reward = torch.exp(- goal_x * goal_x / 10 - goal_y * goal_y / 10)
     return reward
 
 

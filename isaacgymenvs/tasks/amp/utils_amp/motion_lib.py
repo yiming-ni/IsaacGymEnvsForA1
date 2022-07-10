@@ -454,7 +454,7 @@ class A1MotionLib(MotionLib):
                                                                    to_torch(np.expand_dims(dt[ids], -1), device=self._device)
                                                                    )
 
-            link_pos = self._key_body_pos[uid].reshape(num_frames[0], -1, 3)
+            link_pos = self._key_body_pos[uid].reshape(self._motion_num_frames[uid], -1, 3)
             key_pos0[ids, :, :] = link_pos[frame_idx0[ids][:, np.newaxis], self._key_body_ids[np.newaxis, :]]
             key_pos1[ids, :, :] = link_pos[frame_idx1[ids][:, np.newaxis], self._key_body_ids[np.newaxis, :]]
 
