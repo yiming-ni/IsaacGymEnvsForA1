@@ -18,7 +18,7 @@ env:
   hybridInitProb: 0.5
   numAMPObsSteps: 5
 
-  localRootObs: False
+  localRootObs: True
   contactBodies: ["FR_foot", "FL_foot", "RR_foot", "RL_foot", "FR_calf", "FL_calf", "RR_calf", "RL_calf"]
   terminationHeight: 0.15
   enableEarlyTermination: True

@@ -21,7 +21,7 @@ params:
           b: 0.01
         sigma_init:
           name: const_initializer
-          val: -2.9
+          val: -3
         fixed_sigma: True
         learn_sigma: False
 
@@ -61,13 +61,13 @@ params:
     normalize_advantage: True
     gamma: 0.99
     tau: 0.95
-    learning_rate: 5e-4  #5e-5
+    learning_rate: 0.001  #5e-5
     lr_schedule: constant
     kl_threshold: 0.008
     score_to_win: 20000
-    max_epochs: ${resolve_default:5000,${....max_iterations}}
-    save_best_after: 100
-    save_frequency: 50
+    max_epochs: ${resolve_default:6000,${....max_iterations}}
+    save_best_after: 500
+    save_frequency: 100
     print_stats: True
     grad_norm: 1.0
     entropy_coef: 0.0
@@ -87,7 +87,7 @@ params:
     amp_minibatch_size: 4096  # 4
     disc_coef: 5
     disc_logit_reg: 0.05
-    disc_grad_penalty: 1
+    disc_grad_penalty: 5
     disc_reward_scale: 2
     disc_weight_decay: 0.0001
     normalize_amp_input: True
