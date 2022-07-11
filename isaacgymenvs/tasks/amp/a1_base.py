@@ -61,9 +61,6 @@ KEY_BODY_NAMES = ["FR_foot", "FL_foot", "RR_foot", "RL_foot"]
 class A1Base(VecTask):
 
     def __init__(self, config, sim_device, graphics_device_id, headless):
-        # self.writer = SummaryWriter()
-        # self.iter = 0
-        # self.pd_iter = 0
 
         self.cfg = config
 
@@ -189,6 +186,9 @@ class A1Base(VecTask):
         if self._pd_control:
             self._build_pd_action_offset_scale()
 
+        env_ids = torch.arange(0, self.num_envs, device=self.device)
+        self.action_filter.reset(env_ids, self._pd_target_to_action(initial_dof.expand(self.num_envs, -1)))
+
         return
 
     def _get_root_states_from_tensor(self, states_tensor):
@@ -251,7 +251,7 @@ class A1Base(VecTask):
         self._reset_goal_pos(env_ids)
         self._refresh_sim_tensors()
         self._compute_observations(env_ids)
-        self._rest_robot(env_ids)
+        self._reset_robot(env_ids)
         return
 
     def set_char_color(self, col):
@@ -576,7 +576,7 @@ class A1Base(VecTask):
         self._terminate_buf[env_ids] = 0
         return
 
-    def _rest_robot(self, env_ids):
+    def _reset_robot(self, env_ids):
         ref = torch.tensor([0.0, 0.90, -1.80, 0.0, 0.90, -1.80,
                             0.0, 0.90, -1.80, 0.0, 0.90, -1.80]).to(self.device)
         self.action_filter.reset(env_ids, self._pd_target_to_action(ref.expand(len(env_ids), -1)))
@@ -609,6 +609,9 @@ class A1Base(VecTask):
 
         action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
         self.actions = action_tensor.to(self.device).clone()
+        # reset_env_ids = (self.progress_buf == 0).nonzero(as_tuple=False).flatten()
+        # if reset_env_ids.shape != (0,):
+        #     self.action_filter.reset(reset_env_ids, self.actions[reset_env_ids])
         self.actions = self.action_filter.filter(self.actions)
         # step physics and render each frame
         self.render()
