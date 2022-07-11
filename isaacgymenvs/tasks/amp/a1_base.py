@@ -38,6 +38,7 @@ from isaacgym.torch_utils import *
 
 from isaacgymenvs.utils.torch_jit_utils import *
 from ..base.vec_task import VecTask
+from ..base.base_utils.action_filter import ActionFilterButter
 from ..base.observation_buffer import ObservationBuffer
 # from tensorboardX import SummaryWriter
 
@@ -174,6 +175,8 @@ class A1Base(VecTask):
         self._rigid_body_ang_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[..., 10:13]
         self._contact_forces = gymtorch.wrap_tensor(contact_force_tensor).view(self.num_envs, self.num_bodies+self.num_markers, 3)
 
+        self.action_filter = ActionFilterButter(lowcut=None, highcut=[4], sampling_rate=1. / self.dt, order=2,
+                                                num_joints=12, device=self.device, num_envs=self.num_envs)
 
         self._terminate_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
         # track goal progress
@@ -248,6 +251,7 @@ class A1Base(VecTask):
         self._reset_goal_pos(env_ids)
         self._refresh_sim_tensors()
         self._compute_observations(env_ids)
+        self._rest_robot(env_ids)
         return
 
     def set_char_color(self, col):
@@ -572,6 +576,11 @@ class A1Base(VecTask):
         self._terminate_buf[env_ids] = 0
         return
 
+    def _rest_robot(self, env_ids):
+        ref = torch.tensor([0.0, 0.90, -1.80, 0.0, 0.90, -1.80,
+                            0.0, 0.90, -1.80, 0.0, 0.90, -1.80]).to(self.device)
+        self.action_filter.reset(env_ids, self._pd_target_to_action(ref.expand(len(env_ids), -1)))
+
     def _compute_torques(self, pd_tar):
         """compute torques from actions.
            actions can be position or velocity targets given to a PD controller, or scaled torques.
@@ -600,6 +609,7 @@ class A1Base(VecTask):
 
         action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
         self.actions = action_tensor.to(self.device).clone()
+        self.actions = self.action_filter.filter(self.actions)
         # step physics and render each frame
         self.render()
         pd_tar = self._action_to_pd_targets(self.actions)
@@ -611,7 +621,6 @@ class A1Base(VecTask):
                 self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
 
-        # fill time out buffer
         self.timeout_buf = torch.where(self.progress_buf >= self.max_episode_length - 1,
                                        torch.ones_like(self.timeout_buf), torch.zeros_like(self.timeout_buf))
 
@@ -725,6 +734,10 @@ class A1Base(VecTask):
     def _action_to_pd_targets(self, action):
         pd_tar = self._pd_action_offset + self._pd_action_scale * action
         return pd_tar
+
+    def _pd_target_to_action(self, pd_tar):
+        action = (pd_tar - self._pd_action_offset) / self._pd_action_scale
+        return action
 
     def _init_camera(self):
         self.gym.refresh_actor_root_state_tensor(self.sim)
