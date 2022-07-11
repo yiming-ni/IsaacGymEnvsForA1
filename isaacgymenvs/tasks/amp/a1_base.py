@@ -393,7 +393,7 @@ class A1Base(VecTask):
             handle = self.gym.create_actor(env_ptr, a1_asset, start_pose, "a1", i, contact_filter, 0)
 
             init_goal_pos.p.x = random.randrange(10, 15, 1)
-            init_goal_pos.p.y = random.randrange(5, 10, 1)
+            init_goal_pos.p.y = random.randrange(-5, 5, 1)
             init_goal_pos.p.z = 0.2
             goal_handle = self.gym.create_actor(env_ptr, goal_asset, init_goal_pos, "goal", i, 1, 0)
             self.gym.set_rigid_body_color(env_ptr, goal_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(1, 0, 0))
@@ -816,7 +816,7 @@ def compute_a1_reward(obs_buf):
 
     goal_x = obs_buf[:, -2]
     goal_y = obs_buf[:, -1]
-    reward = torch.exp(- goal_x * goal_x / 10 - goal_y * goal_y / 10)
+    reward = torch.exp(- goal_x * goal_x / 100 - goal_y * goal_y / 100)
     return reward
 
 
