@@ -37,6 +37,7 @@ from isaacgym.torch_utils import *
 
 from isaacgymenvs.utils.torch_jit_utils import *
 from ..base.vec_task import VecTask
+from ..base.base_utils.action_filter import ActionFilterButter
 from ..base.observation_buffer import ObservationBuffer
 # from tensorboardX import SummaryWriter
 
@@ -169,6 +170,8 @@ class A1Base(VecTask):
         self._rigid_body_ang_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[..., 10:13]
         self._contact_forces = gymtorch.wrap_tensor(contact_force_tensor).view(self.num_envs, self.num_bodies+self.num_markers, 3)
 
+        self.action_filter = ActionFilterButter(lowcut=None, highcut=[4], sampling_rate=1. / self.dt, order=2,
+                                                num_joints=12, device=self.device, num_envs=self.num_envs)
 
         self._terminate_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
 
@@ -235,6 +238,7 @@ class A1Base(VecTask):
         self._reset_actors(env_ids)
         self._refresh_sim_tensors()
         self._compute_observations(env_ids)
+        self._rest_robot(env_ids)
         return
 
     def set_char_color(self, col):
@@ -538,6 +542,11 @@ class A1Base(VecTask):
         self._terminate_buf[env_ids] = 0
         return
 
+    def _rest_robot(self, env_ids):
+        ref = torch.tensor([0.0, 0.90, -1.80, 0.0, 0.90, -1.80,
+                            0.0, 0.90, -1.80, 0.0, 0.90, -1.80]).to(self.device)
+        self.action_filter.reset(env_ids, self._pd_target_to_action(ref.expand(len(env_ids), -1)))
+
     def _compute_torques(self, pd_tar):
         """compute torques from actions.
            actions can be position or velocity targets given to a PD controller, or scaled torques.
@@ -567,44 +576,18 @@ class A1Base(VecTask):
 
         action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
         self.actions = action_tensor.to(self.device).clone()
+        self.actions = self.action_filter.filter(self.actions)
         # step physics and render each frame
         self.render()
         pd_tar = self._action_to_pd_targets(self.actions)
         for _ in range(self.control_freq_inv):
             self.torques = self._compute_torques(pd_tar).view(self.torques.shape)
-            # self.writer.add_scalar("torques/torque[0]", self.torques[0, 0], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[1]", self.torques[0, 1], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[2]", self.torques[0, 2], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[3]", self.torques[0, 3], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[4]", self.torques[0, 4], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[5]", self.torques[0, 5], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[6]", self.torques[0, 6], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[7]", self.torques[0, 7], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[8]", self.torques[0, 8], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[9]", self.torques[0, 9], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[10]", self.torques[0, 10], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[11]", self.torques[0, 11], self.pd_iter)
-            # self.pd_iter += 1
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
             self.gym.simulate(self.sim)
             if self.device == 'cpu':
                 self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
 
-        # self.writer.add_scalar("actions/action[0]", pd_tar[0, 0], self.iter)
-        # self.writer.add_scalar("actions/action[1]", pd_tar[0, 1], self.iter)
-        # self.writer.add_scalar("actions/action[2]", pd_tar[0, 2], self.iter)
-        # self.writer.add_scalar("actions/action[3]", pd_tar[0, 3], self.iter)
-        # self.writer.add_scalar("actions/action[4]", pd_tar[0, 4], self.iter)
-        # self.writer.add_scalar("actions/action[5]", pd_tar[0, 5], self.iter)
-        # self.writer.add_scalar("actions/action[6]", pd_tar[0, 6], self.iter)
-        # self.writer.add_scalar("actions/action[7]", pd_tar[0, 7], self.iter)
-        # self.writer.add_scalar("actions/action[8]", pd_tar[0, 8], self.iter)
-        # self.writer.add_scalar("actions/action[9]", pd_tar[0, 9], self.iter)
-        # self.writer.add_scalar("actions/action[10]", pd_tar[0, 10], self.iter)
-        # self.writer.add_scalar("actions/action[11]", pd_tar[0, 11], self.iter)
-        # self.iter += 1
-        # fill time out buffer
         self.timeout_buf = torch.where(self.progress_buf >= self.max_episode_length - 1,
                                        torch.ones_like(self.timeout_buf), torch.zeros_like(self.timeout_buf))
 
@@ -693,6 +676,10 @@ class A1Base(VecTask):
     def _action_to_pd_targets(self, action):
         pd_tar = self._pd_action_offset + self._pd_action_scale * action
         return pd_tar
+
+    def _pd_target_to_action(self, pd_tar):
+        action = (pd_tar - self._pd_action_offset) / self._pd_action_scale
+        return action
 
     def _init_camera(self):
         self.gym.refresh_actor_root_state_tensor(self.sim)
