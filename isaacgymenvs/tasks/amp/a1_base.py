@@ -551,8 +551,7 @@ class A1Base(VecTask):
         self._actions_history[env_ids, :, :] = 0.
         self._states_history[env_ids, :, :] = 0.
         ob_curr = torch.cat([self._root_states[env_ids, 3:7], self._dof_pos[env_ids]], dim=-1)
-        self._states_history[env_ids, :, :] = ob_curr[:, None, :].expand(len(env_ids),
-                                                                              self._states_history.shape[1], -1)[:,:,:]
+        self._states_history[env_ids, :, :] = ob_curr.unsqueeze(-2).expand(len(env_ids), self._states_history.shape[1], -1)
 
     def _compute_torques(self, pd_tar):
         """compute torques from actions.
