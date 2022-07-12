@@ -178,8 +178,8 @@ class A1Base(VecTask):
         if self._pd_control:
             self._build_pd_action_offset_scale()
 
-        env_ids = torch.arange(0, self.num_envs, device=self.device)
-        self.action_filter.reset(env_ids, self._pd_target_to_action(initial_dof.expand(self.num_envs, -1)))
+        # env_ids = torch.arange(0, self.num_envs, device=self.device)
+        # self.action_filter.reset(env_ids, self._pd_target_to_action(initial_dof.expand(self.num_envs, -1)))
 
         return
 
@@ -238,7 +238,7 @@ class A1Base(VecTask):
         self._reset_actors(env_ids)
         self._refresh_sim_tensors()
         self._compute_observations(env_ids)
-        self._reset_robot(env_ids)
+        # self._reset_robot(env_ids)
         return
 
     def set_char_color(self, col):
@@ -576,9 +576,10 @@ class A1Base(VecTask):
 
         action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
         self.actions = action_tensor.to(self.device).clone()
-        # reset_env_ids = (self.progress_buf == 0).nonzero(as_tuple=False).flatten()
-        # if reset_env_ids.shape != (0,):
-        #     self.action_filter.reset(reset_env_ids, self.actions[reset_env_ids])
+        # reset action filter if it is the first step
+        reset_env_ids = (self.progress_buf == 0).nonzero(as_tuple=False).flatten()
+        if len(reset_env_ids) > 0:
+            self.action_filter.reset(reset_env_ids, self.actions[reset_env_ids])
         self.actions = self.action_filter.filter(self.actions)
         # step physics and render each frame
         self.render()
