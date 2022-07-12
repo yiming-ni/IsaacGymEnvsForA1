@@ -122,14 +122,15 @@ class A1Base(VecTask):
             self._all_actor_root_states = gymtorch.wrap_tensor(actor_root_state)
             self._root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 0, :]
             self._marker_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 1:, :]
-        else:
+        elif not self.headless:
             self.all_actor_indices = torch.arange(self.num_envs * (self.num_markers+1), dtype=torch.int32, device=self.device).reshape(
                 (self.num_envs, (self.num_markers+1))
             )
             self._all_actor_root_states = gymtorch.wrap_tensor(actor_root_state)
             self._root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 0, :]
-            self._goal_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 1:, :]
-            self._goal_pos = self._goal_root_states[..., :3]
+            self._goal_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 1, :]
+        else:
+            self._root_states = gymtorch.wrap_tensor(actor_root_state)
 
         # self._root_states = gymtorch.wrap_tensor(actor_root_state)
         self._initial_root_states = self._root_states.clone()
@@ -178,6 +179,9 @@ class A1Base(VecTask):
 
 
         self._terminate_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
+        # track goal progress
+        self.goal_terminate = torch.randint(100, 200, (self.num_envs,), device=self.device, dtype=torch.int32)
+        self.goal_step = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
 
         if self.viewer != None:
             self._init_camera()
@@ -291,6 +295,11 @@ class A1Base(VecTask):
         asset_options.thickness = self.cfg["asset"]["thickness"]
         asset_options.disable_gravity = self.cfg["asset"]["disable_gravity"]
 
+        self._goal_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 4.0 + 1.0
+        self._goal_rot = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * torch.pi * 2
+        self._goal_pos = torch.zeros((self.num_envs, 2), dtype=torch.float, device=self.device)
+        self._goal_pos[..., 0] = torch.flatten(self._goal_dist * torch.cos(self._goal_rot))
+        self._goal_pos[..., 1] = torch.flatten(self._goal_dist * torch.sin(self._goal_rot))
         # create marker options if add_markers is true
         if self.add_markers:
             marker_asset_options = gymapi.AssetOptions()
@@ -303,12 +312,14 @@ class A1Base(VecTask):
             init_marker_pos = gymapi.Transform()
             init_marker_pos.p.z = 0.3
             self.num_markers = 4
-        else:
+        elif not self.headless:
             goal_asset_opts = gymapi.AssetOptions()
             goal_asset_opts.fix_base_link = True
             goal_asset = self.gym.create_sphere(self.sim, 0.03, goal_asset_opts)
             init_goal_pos = gymapi.Transform()
             self.num_markers = 1  # TODO for goal pos
+        else:
+            self.num_markers = 0
 
         a1_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
 
@@ -392,11 +403,13 @@ class A1Base(VecTask):
             contact_filter = 1
             handle = self.gym.create_actor(env_ptr, a1_asset, start_pose, "a1", i, contact_filter, 0)
 
-            init_goal_pos.p.x = random.randrange(10, 15, 1)
-            init_goal_pos.p.y = random.randrange(-5, 5, 1)
-            init_goal_pos.p.z = 0.2
-            goal_handle = self.gym.create_actor(env_ptr, goal_asset, init_goal_pos, "goal", i, 1, 0)
-            self.gym.set_rigid_body_color(env_ptr, goal_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(1, 0, 0))
+            if not self.headless:
+
+                init_goal_pos.p.x = self._goal_pos[i, 0]
+                init_goal_pos.p.y = self._goal_pos[i, 1]
+                init_goal_pos.p.z = 0.2
+                goal_handle = self.gym.create_actor(env_ptr, goal_asset, init_goal_pos, "goal", i, 1, 0)
+                self.gym.set_rigid_body_color(env_ptr, goal_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(1, 0, 0))
 
             # create markers
             if self.add_markers:
@@ -489,7 +502,7 @@ class A1Base(VecTask):
         return
 
     def _compute_reward(self, actions):
-        self.rew_buf[:] = compute_a1_reward(self.obs_buf)
+        self.rew_buf[:] = compute_a1_reward(self._root_states[:, :2], self._goal_pos)
         return
 
     def _compute_reset(self):
@@ -522,17 +535,21 @@ class A1Base(VecTask):
 
     def _compute_a1_obs(self, env_ids=None):
         if (env_ids is None):
+            goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
+            goal_pos[..., 2] = 0.2
             root_states = self._root_states
             dof_pos = self._dof_pos
             dof_vel = self._dof_vel
             key_body_pos = self._rigid_body_pos[:, self._key_body_ids, :]
-            goal_pos = self._goal_pos
+            goal_pos[..., :2] = self._goal_pos
         else:
+            goal_pos = torch.zeros((len(env_ids), 3), dtype=torch.float, device=self.device)
+            goal_pos[..., 2] = 0.2
             root_states = self._root_states[env_ids]
             dof_pos = self._dof_pos[env_ids]
             dof_vel = self._dof_vel[env_ids]
             key_body_pos = self._rigid_body_pos[env_ids][:, self._key_body_ids, :]
-            goal_pos = self._goal_pos[env_ids]
+            goal_pos[..., :2] = self._goal_pos[env_ids]
 
         obs = compute_a1_observations(root_states, dof_pos, dof_vel,
                                       key_body_pos, self._local_root_obs, goal_pos)
@@ -641,6 +658,7 @@ class A1Base(VecTask):
         return
 
     def post_physics_step(self):
+        self.goal_step += 1
         self.progress_buf += 1
 
         self._refresh_sim_tensors()
@@ -649,6 +667,25 @@ class A1Base(VecTask):
         self._compute_reset()
 
         self.extras["terminate"] = self._terminate_buf
+
+        # reset goal pos
+        goal_reset_envs = (self.goal_step >= self.goal_terminate).nonzero(as_tuple=False).flatten()
+        if len(goal_reset_envs) > 0:
+            # print('reset encountered!')
+            self.goal_terminate[goal_reset_envs] = torch.randint(100, 200, (len(goal_reset_envs),), device=self.device, dtype=torch.int32)
+            self.goal_step[goal_reset_envs] = 0
+            goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 4.0 + 1.0
+            goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
+            self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot))
+            self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot))
+            if not self.headless:
+                # goal_pos = torch.zeros((self.num_envs, 3), device=self.device)
+                # goal_pos[goal_reset_envs, :2] = self._goal_pos[goal_reset_envs]
+                # goal_pos[goal_reset_envs, 2] = 0.2
+                actor_indices = self.all_actor_indices[goal_reset_envs, 1].flatten()
+                self._goal_root_states[goal_reset_envs, :2] = self._goal_pos[goal_reset_envs]
+                self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
+                                                             gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
 
         # debug viz
         if self.viewer and self.debug_viz:
@@ -791,13 +828,8 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
     flat_local_key_pos = local_end_pos.view(local_key_body_pos.shape[0],
                                             local_key_body_pos.shape[1] * local_key_body_pos.shape[2])
 
-    root_pos_expand = root_pos.unsqueeze(-2)
-    local_goal_pos = goal_pos - root_pos_expand
-    heading_rot_expand_for_goal = heading_rot_expand.repeat((1, local_goal_pos.shape[1], 1))
-    flat_goal_pos = local_goal_pos.view(local_goal_pos.shape[0] * local_goal_pos.shape[1], local_goal_pos.shape[2])
-    flat_heading_rot_for_goal = heading_rot_expand_for_goal.view(heading_rot_expand_for_goal.shape[0] * heading_rot_expand_for_goal.shape[1],
-                                                                 heading_rot_expand_for_goal.shape[2])
-    local_target_pos = my_quat_rotate(flat_heading_rot_for_goal, flat_goal_pos)
+    local_goal_pos = goal_pos - root_pos
+    local_target_pos = my_quat_rotate(heading_rot, local_goal_pos)
     flat_local_goal_xy = local_target_pos[:, :2]
 
     dof_obs = dof_to_obs(dof_pos)
@@ -809,14 +841,14 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
 
 
 @torch.jit.script
-def compute_a1_reward(obs_buf):
-    # type: (Tensor) -> Tensor
+def compute_a1_reward(root_xy, goal_xy):
+    # type: (Tensor, Tensor) -> Tensor
     # without task reward
     # reward = torch.ones_like(obs_buf[:, 0])
 
-    goal_x = obs_buf[:, -2]
-    goal_y = obs_buf[:, -1]
-    reward = torch.exp(- goal_x * goal_x / 100 - goal_y * goal_y / 100)
+    x_diff = root_xy[:, 0] - goal_xy[:, 0]
+    y_diff = root_xy[:, 1] - goal_xy[:, 1]
+    reward = torch.exp(- x_diff * x_diff * 0.5 - y_diff * y_diff / 0.5)
     return reward
 
 
