@@ -244,6 +244,7 @@ class A1Base(VecTask):
 
     def reset_idx(self, env_ids):
         self._reset_actors(env_ids)
+        self._reset_goal_pos(env_ids)
         self._refresh_sim_tensors()
         self._compute_observations(env_ids)
         return
@@ -295,11 +296,11 @@ class A1Base(VecTask):
         asset_options.thickness = self.cfg["asset"]["thickness"]
         asset_options.disable_gravity = self.cfg["asset"]["disable_gravity"]
 
-        self._goal_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 4.0 + 1.0
-        self._goal_rot = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * torch.pi * 2
+        _goal_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 4.0 + 1.0
+        _goal_rot = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self._goal_pos = torch.zeros((self.num_envs, 2), dtype=torch.float, device=self.device)
-        self._goal_pos[..., 0] = torch.flatten(self._goal_dist * torch.cos(self._goal_rot))
-        self._goal_pos[..., 1] = torch.flatten(self._goal_dist * torch.sin(self._goal_rot))
+        self._goal_pos[..., 0] = torch.flatten(_goal_dist * torch.cos(_goal_rot))
+        self._goal_pos[..., 1] = torch.flatten(_goal_dist * torch.sin(_goal_rot))
         # create marker options if add_markers is true
         if self.add_markers:
             marker_asset_options = gymapi.AssetOptions()
@@ -672,26 +673,31 @@ class A1Base(VecTask):
         goal_reset_envs = (self.goal_step >= self.goal_terminate).nonzero(as_tuple=False).flatten()
         if len(goal_reset_envs) > 0:
             # print('reset encountered!')
-            self.goal_terminate[goal_reset_envs] = torch.randint(100, 200, (len(goal_reset_envs),), device=self.device, dtype=torch.int32)
-            self.goal_step[goal_reset_envs] = 0
-            goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 4.0 + 1.0
-            goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
-            self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot))
-            self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot))
-            if not self.headless:
-                # goal_pos = torch.zeros((self.num_envs, 3), device=self.device)
-                # goal_pos[goal_reset_envs, :2] = self._goal_pos[goal_reset_envs]
-                # goal_pos[goal_reset_envs, 2] = 0.2
-                actor_indices = self.all_actor_indices[goal_reset_envs, 1].flatten()
-                self._goal_root_states[goal_reset_envs, :2] = self._goal_pos[goal_reset_envs]
-                self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
-                                                             gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
+            self._reset_goal_pos(goal_reset_envs)
 
         # debug viz
         if self.viewer and self.debug_viz:
             self._update_debug_viz()
 
         return
+
+    def _reset_goal_pos(self, goal_reset_envs):
+        self.goal_terminate[goal_reset_envs] = torch.randint(100, 200, (len(goal_reset_envs),), device=self.device,
+                                                             dtype=torch.int32)
+        self.goal_step[goal_reset_envs] = 0
+        goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 4.0 + 1.0
+        goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
+        self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot))
+        self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot))
+        if not self.headless:
+            # goal_pos = torch.zeros((self.num_envs, 3), device=self.device)
+            # goal_pos[goal_reset_envs, :2] = self._goal_pos[goal_reset_envs]
+            # goal_pos[goal_reset_envs, 2] = 0.2
+            actor_indices = self.all_actor_indices[goal_reset_envs, 1].flatten()
+            self._goal_root_states[goal_reset_envs, :2] = self._goal_pos[goal_reset_envs]
+            self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
+                                                         gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
+
 
     def render(self):
         if self.viewer and self.camera_follow:
