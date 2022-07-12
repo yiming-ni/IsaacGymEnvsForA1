@@ -37,12 +37,11 @@ from isaacgym.torch_utils import *
 
 from isaacgymenvs.utils.torch_jit_utils import *
 from ..base.vec_task import VecTask
-from ..base.observation_buffer import ObservationBuffer
 # from tensorboardX import SummaryWriter
 
 DOF_BODY_IDS = [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15]
 DOF_OFFSETS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-NUM_OBS = 1 + 6 + 3 + 3 + 12 + 12 + 4*3  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
+NUM_OBS = (16 + 12) * 15 + 16  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
 # base_height, base_orientation=4, base_angular_vel=3, joint_pos=12, joint_velocity=12
 # orientation, joint_pos, 4+12+history
 NUM_ACTIONS = 12
@@ -91,8 +90,6 @@ class A1Base(VecTask):
                          headless=headless)
 
         self.history_steps = self.cfg["env"].get("historySteps", None)
-        if self.history_steps is not None:
-            self.obs_buf_history = ObservationBuffer(self.num_envs, self.num_obs, self.history_steps, self.device)
 
         dt = self.cfg["sim"]["dt"]
         self.dt = self.control_freq_inv * dt
@@ -169,6 +166,10 @@ class A1Base(VecTask):
         self._rigid_body_ang_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[..., 10:13]
         self._contact_forces = gymtorch.wrap_tensor(contact_force_tensor).view(self.num_envs, self.num_bodies+self.num_markers, 3)
 
+        self._states_history = torch.zeros((self.num_envs, self.history_steps, 16), device=self.device) # base_quat(4) + dof_pos(12)
+        self._actions_history = torch.zeros((self.num_envs, self.history_steps, 12), device=self.device) # dof_pos(12)
+        self.actions = torch.zeros((self.num_envs, self.num_actions), device=self.device)
+
 
         self._terminate_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
 
@@ -234,6 +235,7 @@ class A1Base(VecTask):
     def reset_idx(self, env_ids):
         self._reset_actors(env_ids)
         self._refresh_sim_tensors()
+        self._reset_history_obs(env_ids)
         self._compute_observations(env_ids)
         return
 
@@ -494,31 +496,37 @@ class A1Base(VecTask):
         return
 
     def _compute_observations(self, env_ids=None):
-        obs = self._compute_a1_obs(env_ids)
+        obs, ob_curr = self._compute_a1_obs(env_ids)
+        self._states_history = self._states_history.roll(-1, 1)
+        self._actions_history = self._actions_history.roll(-1, 1)
 
         if (env_ids is None):
             self.obs_buf[:] = obs
+            self._states_history[:, -1, :] = ob_curr[:, :]
+            self._actions_history[:, -1, :] = self.actions[:, :]
         else:
             self.obs_buf[env_ids] = obs
+            self._states_history[env_ids, -1, :] = ob_curr[:, :]
+            self._actions_history[env_ids, -1, :] = self.actions[env_ids, :]
 
         return
 
     def _compute_a1_obs(self, env_ids=None):
         if (env_ids is None):
-            root_states = self._root_states
+            root_quat = self._root_states[:, 3:7]
             dof_pos = self._dof_pos
-            dof_vel = self._dof_vel
-            key_body_pos = self._rigid_body_pos[:, self._key_body_ids, :]
+            ob_prev = torch.cat([self._states_history.flatten(1, 2), self._actions_history.flatten(1, 2)], dim=-1)
+
         else:
-            root_states = self._root_states[env_ids]
+            root_quat = self._root_states[env_ids, 3:7]
             dof_pos = self._dof_pos[env_ids]
-            dof_vel = self._dof_vel[env_ids]
-            key_body_pos = self._rigid_body_pos[env_ids][:, self._key_body_ids, :]
+            ob_prev = torch.cat([self._states_history.flatten(1, 2), self._actions_history.flatten(1, 2)], dim=-1)
+            ob_prev = ob_prev[env_ids]
 
-        obs = compute_a1_observations(root_states, dof_pos, dof_vel,
-                                      key_body_pos, self._local_root_obs)
+        ob_curr = torch.cat([root_quat, dof_pos], dim=-1)
+        obs = torch.cat([ob_prev, ob_curr], dim=-1)
 
-        return obs
+        return obs, ob_curr
 
     def _reset_actors(self, env_ids):
         self._dof_pos[env_ids] = self._initial_dof_pos[env_ids]
@@ -537,6 +545,14 @@ class A1Base(VecTask):
         self.reset_buf[env_ids] = 0
         self._terminate_buf[env_ids] = 0
         return
+
+    def _reset_history_obs(self, env_ids):
+        self.actions[env_ids, :] = 0
+        self._actions_history[env_ids, :, :] = 0.
+        self._states_history[env_ids, :, :] = 0.
+        ob_curr = torch.cat([self._root_states[env_ids, 3:7], self._dof_pos[env_ids]], dim=-1)
+        self._states_history[env_ids, :, :] = ob_curr[:, None, :].expand(len(env_ids),
+                                                                              self._states_history.shape[1], -1)[:,:,:]
 
     def _compute_torques(self, pd_tar):
         """compute torques from actions.
@@ -572,39 +588,12 @@ class A1Base(VecTask):
         pd_tar = self._action_to_pd_targets(self.actions)
         for _ in range(self.control_freq_inv):
             self.torques = self._compute_torques(pd_tar).view(self.torques.shape)
-            # self.writer.add_scalar("torques/torque[0]", self.torques[0, 0], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[1]", self.torques[0, 1], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[2]", self.torques[0, 2], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[3]", self.torques[0, 3], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[4]", self.torques[0, 4], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[5]", self.torques[0, 5], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[6]", self.torques[0, 6], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[7]", self.torques[0, 7], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[8]", self.torques[0, 8], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[9]", self.torques[0, 9], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[10]", self.torques[0, 10], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[11]", self.torques[0, 11], self.pd_iter)
-            # self.pd_iter += 1
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
             self.gym.simulate(self.sim)
             if self.device == 'cpu':
                 self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
 
-        # self.writer.add_scalar("actions/action[0]", pd_tar[0, 0], self.iter)
-        # self.writer.add_scalar("actions/action[1]", pd_tar[0, 1], self.iter)
-        # self.writer.add_scalar("actions/action[2]", pd_tar[0, 2], self.iter)
-        # self.writer.add_scalar("actions/action[3]", pd_tar[0, 3], self.iter)
-        # self.writer.add_scalar("actions/action[4]", pd_tar[0, 4], self.iter)
-        # self.writer.add_scalar("actions/action[5]", pd_tar[0, 5], self.iter)
-        # self.writer.add_scalar("actions/action[6]", pd_tar[0, 6], self.iter)
-        # self.writer.add_scalar("actions/action[7]", pd_tar[0, 7], self.iter)
-        # self.writer.add_scalar("actions/action[8]", pd_tar[0, 8], self.iter)
-        # self.writer.add_scalar("actions/action[9]", pd_tar[0, 9], self.iter)
-        # self.writer.add_scalar("actions/action[10]", pd_tar[0, 10], self.iter)
-        # self.writer.add_scalar("actions/action[11]", pd_tar[0, 11], self.iter)
-        # self.iter += 1
-        # fill time out buffer
         self.timeout_buf = torch.where(self.progress_buf >= self.max_episode_length - 1,
                                        torch.ones_like(self.timeout_buf), torch.zeros_like(self.timeout_buf))
 
@@ -617,14 +606,7 @@ class A1Base(VecTask):
 
         self.extras["time_outs"] = self.timeout_buf.to(self.rl_device)
 
-        if self.history_steps is not None:
-            obs_buf = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
-            done_env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
-            self.obs_buf_history.reset(done_env_ids, obs_buf[done_env_ids])
-            self.obs_buf_history.insert(obs_buf)
-            self.obs_dict["obs"] = self.obs_buf_history.get_obs_vec(np.arange(self.history_steps))
-        else:
-            self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+        self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
 
         # asymmetric actor-critic
         if self.num_states > 0:

@@ -4,7 +4,8 @@ name: A1AMP
 physics_engine: ${..physics_engine}
 
 # if given, will override the device setting in gym.
-env: 
+env:
+  historySteps: 15
   numEnvs: ${resolve_default:4096,${...num_envs}}
   envSpacing: 3
   episodeLength: 300
