@@ -97,11 +97,14 @@ class ActionFilter(object):
     self.yhist = torch.zeros((num_envs, num_joints, self.hist_len)).to(device).to(torch.float32)
     self.xhist = torch.zeros((num_envs, num_joints, self.hist_len)).to(device).to(torch.float32)
 
+    # self.reset_done = False
+
   def reset(self, env_id, x):
     """Resets the history buffers to 0."""
     # print("reset filter", x)
     self.xhist[env_id,:,:] = x.unsqueeze(-1).expand(-1,-1,self.hist_len)
     self.yhist[env_id,:,:] = x.unsqueeze(-1).expand(-1,-1,self.hist_len)
+    # self.reset_done = True
 
   def filter(self, x):
     """Returns filtered x."""
@@ -112,6 +115,10 @@ class ActionFilter(object):
     self.xhist[:,:,0] = x[:,:]
     self.yhist = self.yhist.roll(1,-1)
     self.yhist[:,:,0] = y[:,:]
+
+    # if self.reset_done:
+    #   print('x: ', x, '\ny: ', y)
+    # self.reset_done = False
 
     return y
 
