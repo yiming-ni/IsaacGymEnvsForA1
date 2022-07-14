@@ -344,11 +344,8 @@ class A1Base(VecTask):
         if self.domain_rand and self.dr_pd:
             self._reset_pd_gains(env_ids)
         self._refresh_sim_tensors()
-        self._reset_history_obs(env_ids)
-        self._compute_observations(env_ids)
-        self._reset_robot(env_ids)
-        if self.domain_rand and self.dr_push_robot:
-            self._reset_push(env_ids)
+        self._reset_obs(env_ids)
+        # self._compute_observations(env_ids)
         return
 
     def _reset_pd_gains(self, env_ids):
@@ -692,12 +689,15 @@ class A1Base(VecTask):
         self._terminate_buf[env_ids] = 0
         return
 
-    def _reset_history_obs(self, env_ids):
+    def _reset_obs(self, env_ids):
         self.actions[env_ids, :] = 0
         self._actions_history[env_ids, :, :] = 0.
         self._states_history[env_ids, :, :] = 0.
         ob_curr = torch.cat([self._root_states[env_ids, 3:7], self._dof_pos[env_ids]], dim=-1)
         self._states_history[env_ids, :, :] = ob_curr.unsqueeze(-2).expand(len(env_ids), self._states_history.shape[1], -1)
+        ob_prev = torch.cat([self._states_history[env_ids].flatten(1, 2), self._actions_history[env_ids].flatten(1, 2)], dim=-1)
+        obs = torch.cat([ob_prev, ob_curr], dim=-1)
+        self.obs_buf[env_ids] = obs
 
     def _compute_torques(self, pd_tar):
         """compute torques from actions.
