@@ -38,6 +38,7 @@ from isaacgym.torch_utils import *
 from isaacgymenvs.utils.torch_jit_utils import *
 from ..base.vec_task import VecTask
 from ..base.base_utils.action_filter import ActionFilterButter
+from ..base.base_utils.communication_blocker import CommunicationBlocker
 from ..base.observation_buffer import ObservationBuffer
 # from tensorboardX import SummaryWriter
 
@@ -84,6 +85,14 @@ class A1Base(VecTask):
 
         # add marker if true
         self.add_markers = self.cfg["env"].get("addMarkers", False)
+        # initialize domain randomization
+        self.domain_rand = self.cfg["task"].get("domain_rand", None)
+        if self.domain_rand:
+            self.dr_push_robot = self.domain_rand["push_robots"]
+            self.dr_friction = self.domain_rand["randomize_friction"]
+            self.dr_joint_friction = self.domain_rand["randomize_joint_friction"]
+            self.dr_base_mass = self.domain_rand["randomize_base_mass"]
+            self.dr_pd = self.domain_rand["randomize_PD"]
 
         super().__init__(config=self.cfg, sim_device=sim_device, graphics_device_id=graphics_device_id,
                          headless=headless)
@@ -133,8 +142,19 @@ class A1Base(VecTask):
         self._dof_state = gymtorch.wrap_tensor(dof_state_tensor)
         self._dof_pos = self._dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
         self._dof_vel = self._dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
+
+        # create wrapper tensor for rigid body
+        self.rb_states = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)
+
+        # initiate noise
+        self.add_noise = self.cfg["task"]["noise"]["add_noise"]
+        if self.add_noise:
+            self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
+
         self.torques = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device,
                                    requires_grad=False)
+        self.init_p_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.init_d_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.p_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.d_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.last_dof_vel = torch.zeros_like(self._dof_vel)
@@ -153,6 +173,9 @@ class A1Base(VecTask):
                 if self.cfg["control"]["control_type"] in ["P", "V"]:
                     print(f"PD gain of joint {name} were not defined, setting them to zero")
 
+        if self.domain_rand and self.dr_pd:
+            self.randomized_p_gains, self.randomized_d_gains = self._compute_randomized_gains(self.num_envs)
+
         self._initial_dof_pos = torch.zeros_like(self._dof_pos, device=self.device, dtype=torch.float)
         initial_dof = np.array([0, 0.9, -1.8] * 4)
         initial_dof = torch.tensor(initial_dof, device=self.device, dtype=torch.float)
@@ -170,6 +193,14 @@ class A1Base(VecTask):
         self.action_filter = ActionFilterButter(lowcut=None, highcut=[4], sampling_rate=1. / self.dt, order=2,
                                                 num_joints=12, device=self.device, num_envs=self.num_envs)
 
+        if self.domain_rand and self.dr_push_robot:
+            self.perturbation_enabled_episodes = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device,
+                                                             requires_grad=False)
+            self.perturbation_time = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
+                                                 requires_grad=False)
+            self.perturbation_forces = torch.zeros((self.num_envs, 1, 3), device=self.device, dtype=torch.float)
+            self.perturbation_torques = torch.zeros((self.num_envs, 1, 3), device=self.device, dtype=torch.float)
+
         self._terminate_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
 
         if self.viewer != None:
@@ -182,6 +213,28 @@ class A1Base(VecTask):
         # self.action_filter.reset(env_ids, self._pd_target_to_action(initial_dof.expand(self.num_envs, -1)))
 
         return
+
+    def _get_noise_scale_vec(self, cfg):
+        """ Sets a vector used to scale the noise added to the observations.
+            [NOTE]: Must be adapted when changing the observations structure
+        Args:
+            cfg (Dict): Environment config file
+        Returns:
+            [torch.Tensor]: Vector of scales used to multiply a uniform distribution in [-1, 1]
+        """
+        noise_vec = torch.zeros(self.num_obs, dtype=torch.float, device=self.device)
+        noise_scales = self.cfg["task"]["noise"]["noise_scales"]
+        noise_level = self.cfg["task"]["noise"]["noise_level"]
+        # TODO change for actual obs
+        noise_vec[1:6] = noise_scales["base_quat"] * noise_level
+        noise_vec[13:25] = noise_scales["dof_pos"] * noise_level
+        noise_vec[25:37] = noise_scales["dof_vel"] * noise_level
+        self.noise_scale_dof_vel = noise_scales["dof_vel"] * noise_level
+        return noise_vec
+
+    def _compute_randomized_gains(self, num_envs):
+        scaler = torch_rand_float(1.0 - 0.2, 1.0 + 0.2, (num_envs, self.num_actions), device=self.device)
+        return self.p_gains * scaler, self.d_gains * scaler
 
     def get_obs_size(self):
         return NUM_OBS
@@ -201,6 +254,36 @@ class A1Base(VecTask):
             self.apply_randomizations(self.randomization_params)
 
         return
+
+    def _process_rigid_shape_props(self, props, env_id):
+        """ Callback allowing to store/change/randomize the rigid shape properties of each environment.
+            Called During environment creation.
+            Base behavior: randomizes the friction of each environment
+        Args:
+            props (List[gymapi.RigidShapeProperties]): Properties of each shape of the asset
+            env_id (int): Environment id
+        Returns:
+            [List[gymapi.RigidShapeProperties]]: Modified rigid shape properties
+        """
+        if self.domain_rand and self.dr_friction:
+            if env_id == 0:
+                # prepare friction randomization
+                friction_range = self.domain_rand["friction_range"]
+                num_buckets = 64
+                bucket_ids = torch.randint(0, num_buckets, (self.num_envs, 1))
+                friction_buckets = torch_rand_float(friction_range[0], friction_range[1], (num_buckets, 1),
+                                                    device='cpu')
+                self.friction_coeffs = friction_buckets[bucket_ids]
+                rolling_friction_buckets = torch_rand_float(0, 1e-4, (num_buckets, 1), device='cpu')
+                self.rolling_friction_coeffs = rolling_friction_buckets[bucket_ids]
+                self.all_friction_coeffs = torch.cat([self.friction_coeffs, self.rolling_friction_coeffs], dim=-1).to(
+                    self.device)
+
+            for s in range(len(props)):
+                props[s].friction = self.friction_coeffs[env_id]
+                props[s].rolling_friction = self.rolling_friction_coeffs[env_id]
+
+        return props
 
     def _process_dof_props(self, props, env_id):
         """store, change, randomize the DOF properties of each env.
@@ -232,14 +315,49 @@ class A1Base(VecTask):
                 self.torque_limits[i] *= \
                     self.cfg["task"]["randomization_params"]["actor_params"]["a1"]["dof_properties"][
                         "soft_dof_torque_limit"]
+                if self.dr_joint_friction:
+                    props["friction"][i] = np.abs(np.random.normal(0, self.cfg["task"]["domain_rand"]["joint_friction_std"]))
+        return props
+
+    def _process_rigid_body_props(self, props, env_id):
+        # randomize base mass
+        if self.domain_rand and self.dr_base_mass:
+            mass_ratio = self.domain_rand["mass_ratio_range"]
+            inertia_ratio = self.domain_rand["inertia_ratio_range"]
+            for i in range(len(props)):
+                props[i].mass *= np.random.uniform(1 - mass_ratio, 1 + mass_ratio)
+                if i != 0:
+                    props[i].com.x += np.random.uniform(-0.05, 0.05)
+                    props[i].com.y += np.random.uniform(-0.05, 0.05)
+                    props[i].com.z += np.random.uniform(-0.05, 0.05)
+                props[i].inertia.x *= np.random.uniform(1 - inertia_ratio, 1 + inertia_ratio)
+                props[i].inertia.y *= np.random.uniform(1 - inertia_ratio, 1 + inertia_ratio)
+                props[i].inertia.z *= np.random.uniform(1 - inertia_ratio, 1 + inertia_ratio)
+
+            props[0].com.x += np.random.uniform(-0.1, 0.1)
+            props[0].com.y += np.random.uniform(-0.1, 0.1)
+            props[0].com.z += np.random.uniform(-0.1, 0.1)
         return props
 
     def reset_idx(self, env_ids):
         self._reset_actors(env_ids)
+        if self.domain_rand and self.dr_pd:
+            self._reset_pd_gains(env_ids)
         self._refresh_sim_tensors()
         self._compute_observations(env_ids)
         self._reset_robot(env_ids)
+        if self.domain_rand and self.dr_push_robot:
+            self._reset_push(env_ids)
         return
+
+    def _reset_pd_gains(self, env_ids):
+        p_gains, d_gains = self._compute_randomized_gains(len(env_ids))
+        self.randomized_p_gains[env_ids], self.randomized_d_gains[env_ids] = p_gains, d_gains
+
+    def _reset_push(self, env_ids):
+        mask = torch.rand(len(env_ids), device=self.device) > 0.1
+        self.perturbation_enabled_episodes[env_ids[mask]] = True
+        self.perturbation_enabled_episodes[env_ids[~mask]] = False
 
     def set_char_color(self, col):
         for i in range(self.num_envs):
@@ -310,6 +428,7 @@ class A1Base(VecTask):
         # TODO above for actuator
         dof_props_asset = self.gym.get_asset_dof_properties(a1_asset)
         motor_efforts = [p.item() for p in dof_props_asset["effort"]]
+        rigid_shape_props_asset = self.gym.get_asset_rigid_shape_properties(a1_asset)
 
         # create force sensors at the feet
         rr_foot_idx = self.gym.find_asset_rigid_body_index(a1_asset, "RR_foot")
@@ -401,7 +520,13 @@ class A1Base(VecTask):
                                               gymapi.Vec3(1, 1, 1))  # white
 
             # TODO below for computing torque limits
-            self._process_dof_props(dof_props_asset, i)
+            rigid_shape_props = self._process_rigid_shape_props(rigid_shape_props_asset, i)
+            self.gym.set_asset_rigid_shape_properties(a1_asset, rigid_shape_props)
+            dof_props = self._process_dof_props(dof_props_asset, i)
+            self.gym.set_actor_dof_properties(env_ptr, handle, dof_props)
+            body_props = self.gym.get_actor_rigid_body_properties(env_ptr, handle)
+            body_props = self._process_rigid_body_props(body_props, i)
+            self.gym.set_actor_rigid_body_properties(env_ptr, handle, body_props, recomputeInertia=True)
 
             self.gym.enable_actor_dof_force_sensors(env_ptr, handle)
 
@@ -500,6 +625,9 @@ class A1Base(VecTask):
     def _compute_observations(self, env_ids=None):
         obs = self._compute_a1_obs(env_ids)
 
+        if self.add_noise:
+            obs += torch.rand_like(obs) * self.noise_scale_vec
+
         if (env_ids is None):
             self.obs_buf[:] = obs
         else:
@@ -554,15 +682,20 @@ class A1Base(VecTask):
         returns: torques sent to the simulation
         """
         control_type = self.cfg["control"].get("control_type", "P")
-        p_gains = self.p_gains
-        d_gains = self.d_gains
+        if self.domain_rand and self.dr_pd:
+            p_gains = self.randomized_p_gains
+            d_gains = self.randomized_d_gains
+        else:
+            p_gains = self.p_gains
+            d_gains = self.d_gains
         if control_type == "P":
-            torques = p_gains * (pd_tar - self._dof_pos) - d_gains * self._dof_vel
-        elif control_type == "V":
-            torques = p_gains * (pd_tar - self._dof_vel) - d_gains * (
-                    self._dof_vel - self.last_dof_vel) / self.sim_params.dt
-        elif control_type == "T":
-            torques = pd_tar
+            if self.add_noise:
+                torques = (p_gains * (pd_tar -(self._dof_pos + torch.rand_like(self._dof_pos, device=self.device) * self.noise_scale_vec[4:16]))
+                           - d_gains * (self._dof_vel + torch.rand_like(self._dof_vel, device=self.device) * self.noise_scale_dof_vel))
+
+            else:
+                torques = p_gains * (pd_tar - self._dof_pos) - d_gains * self._dof_vel
+
         else:
             raise NameError(f'Unknown controller type: {control_type}')
         # return torques
@@ -570,9 +703,6 @@ class A1Base(VecTask):
 
     # TODO for manual pd control
     def step(self, actions):
-        if self.dr_randomizations.get('actions', None):
-            actions = self.dr_randomizations['actions']['noise_lambda'](actions)
-
         action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
         self.actions = action_tensor.to(self.device).clone()
         # step physics and render each frame
@@ -633,6 +763,8 @@ class A1Base(VecTask):
         self.progress_buf += 1
 
         self._refresh_sim_tensors()
+        if self.dr_push_robot:
+            self._push_robots()
         self._compute_observations()
         self._compute_reward(self.actions)
         self._compute_reset()
@@ -644,6 +776,28 @@ class A1Base(VecTask):
             self._update_debug_viz()
 
         return
+
+    def _push_robots(self):
+        """ Randomly pushes the robots. Emulates an impulse by setting a randomized base velocity.
+        """
+        forces = torch.zeros((self.num_envs, self.rb_states.shape[1], 3), device=self.device, dtype=torch.float)
+        torques = torch.zeros((self.num_envs, self.rb_states.shape[1], 3), device=self.device, dtype=torch.float)
+
+        mask = self.perturbation_time <= 0
+        apply_mask = torch.rand(self.num_envs, device=self.device) < self.dt  # apply to only a percentage of envs
+        self.perturbation_time[self.perturbation_enabled_episodes & mask & apply_mask] = self.perturbation_time[
+            self.perturbation_enabled_episodes & mask & apply_mask].uniform_(0.1, 3)
+        self.perturbation_forces[self.perturbation_enabled_episodes & mask & apply_mask] = self.perturbation_forces[
+            self.perturbation_enabled_episodes & mask & apply_mask].uniform_(-20, 20)
+        self.perturbation_torques[self.perturbation_enabled_episodes & mask & apply_mask] = self.perturbation_torques[
+            self.perturbation_enabled_episodes & mask & apply_mask].uniform_(-5, 5)
+
+        forces[~mask] = self.perturbation_forces[~mask].expand(-1, self.rb_states.shape[1], -1)
+        torques[~mask] = self.perturbation_torques[~mask].expand(-1, self.rb_states.shape[1], -1)
+        self.perturbation_time[~mask] -= self.dt
+
+        self.gym.apply_rigid_body_force_tensors(self.sim, gymtorch.unwrap_tensor(forces),
+                                                gymtorch.unwrap_tensor(torques), gymapi.GLOBAL_SPACE)
 
     def render(self):
         if self.viewer and self.camera_follow:
