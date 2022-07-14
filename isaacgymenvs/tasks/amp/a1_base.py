@@ -235,8 +235,8 @@ class A1Base(VecTask):
     def reset_idx(self, env_ids):
         self._reset_actors(env_ids)
         self._refresh_sim_tensors()
-        self._reset_history_obs(env_ids)
-        self._compute_observations(env_ids)
+        self._reset_obs(env_ids)
+        # self._compute_observations(env_ids)
         return
 
     def set_char_color(self, col):
@@ -546,12 +546,15 @@ class A1Base(VecTask):
         self._terminate_buf[env_ids] = 0
         return
 
-    def _reset_history_obs(self, env_ids):
+    def _reset_obs(self, env_ids):
         self.actions[env_ids, :] = 0
         self._actions_history[env_ids, :, :] = 0.
         self._states_history[env_ids, :, :] = 0.
         ob_curr = torch.cat([self._root_states[env_ids, 3:7], self._dof_pos[env_ids]], dim=-1)
         self._states_history[env_ids, :, :] = ob_curr.unsqueeze(-2).expand(len(env_ids), self._states_history.shape[1], -1)
+        ob_prev = torch.cat([self._states_history[env_ids].flatten(1, 2), self._actions_history[env_ids].flatten(1, 2)], dim=-1)
+        obs = torch.cat([ob_prev, ob_curr], dim=-1)
+        self.obs_buf[env_ids] = obs
 
     def _compute_torques(self, pd_tar):
         """compute torques from actions.
