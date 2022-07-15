@@ -39,15 +39,16 @@ from isaacgymenvs.utils.torch_jit_utils import *
 from ..base.vec_task import VecTask
 from ..base.base_utils.action_filter import ActionFilterButter
 from ..base.base_utils.communication_blocker import CommunicationBlocker
-from ..base.observation_buffer import ObservationBuffer
 # from tensorboardX import SummaryWriter
 
 DOF_BODY_IDS = [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15]
 DOF_OFFSETS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-NUM_OBS = 1 + 6 + 3 + 3 + 12 + 12 + 4*3  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
+NUM_CURR_OBS = 16
+NUM_ACTIONS = 12
+NUM_OBS = (NUM_CURR_OBS + NUM_ACTIONS) * 15 + NUM_CURR_OBS  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
 # base_height, base_orientation=4, base_angular_vel=3, joint_pos=12, joint_velocity=12
 # orientation, joint_pos, 4+12+history
-NUM_ACTIONS = 12
+
 
 # action 30hz
 # for i in range(int(2000/30)):
@@ -98,8 +99,6 @@ class A1Base(VecTask):
                          headless=headless)
 
         self.history_steps = self.cfg["env"].get("historySteps", None)
-        if self.history_steps is not None:
-            self.obs_buf_history = ObservationBuffer(self.num_envs, self.num_obs, self.history_steps, self.device)
 
         dt = self.cfg["sim"]["dt"]
         self.dt = self.control_freq_inv * dt
@@ -201,6 +200,15 @@ class A1Base(VecTask):
             self.perturbation_forces = torch.zeros((self.num_envs, 1, 3), device=self.device, dtype=torch.float)
             self.perturbation_torques = torch.zeros((self.num_envs, 1, 3), device=self.device, dtype=torch.float)
 
+        self.actions = torch.zeros((self.num_envs, self.num_actions), device=self.device)
+        # self.obs = torch.zeros((self.num_envs, NUM_OBS), device=self.device)
+        # self._states_history = self.obs[:, :-NUM_CURR_OBS].view(self.num_envs, self.history_steps, -1)[:, :, :NUM_CURR_OBS]
+        # self._actions_history = self.obs[:, :-NUM_CURR_OBS].view(self.num_envs, self.history_steps, -1)[:, :, NUM_CURR_OBS:]
+        # self._curr_obs = self.obs[:, -NUM_CURR_OBS:]
+        states_idx = NUM_CURR_OBS*(self.history_steps+1)
+        self._states_history = self.obs_buf[:, :states_idx].view(self.num_envs, self.history_steps+1, -1)  # last entry is current obs
+        self._actions_history = self.obs_buf[:, states_idx:].view(self.num_envs, self.history_steps, -1)
+
         self._terminate_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
 
         if self.viewer != None:
@@ -222,13 +230,14 @@ class A1Base(VecTask):
         Returns:
             [torch.Tensor]: Vector of scales used to multiply a uniform distribution in [-1, 1]
         """
-        noise_vec = torch.zeros(self.num_obs, dtype=torch.float, device=self.device)
+        # noise_vec = torch.zeros(self.num_obs, dtype=torch.float, device=self.device)
+        noise_vec = torch.zeros(NUM_CURR_OBS, dtype=torch.float, device=self.device)
         noise_scales = self.cfg["task"]["noise"]["noise_scales"]
         noise_level = self.cfg["task"]["noise"]["noise_level"]
         # TODO change for actual obs
-        noise_vec[1:6] = noise_scales["base_quat"] * noise_level
-        noise_vec[13:25] = noise_scales["dof_pos"] * noise_level
-        noise_vec[25:37] = noise_scales["dof_vel"] * noise_level
+        noise_vec[:4] = noise_scales["base_quat"] * noise_level
+        noise_vec[4:16] = noise_scales["dof_pos"] * noise_level
+        # noise_vec[25:37] = noise_scales["dof_vel"] * noise_level
         self.noise_scale_dof_vel = noise_scales["dof_vel"] * noise_level
         return noise_vec
 
@@ -272,9 +281,9 @@ class A1Base(VecTask):
                 num_buckets = 64
                 bucket_ids = torch.randint(0, num_buckets, (self.num_envs, 1))
                 friction_buckets = torch_rand_float(friction_range[0], friction_range[1], (num_buckets, 1),
-                                                    device='cpu')
+                                                    device=self.device)
                 self.friction_coeffs = friction_buckets[bucket_ids]
-                rolling_friction_buckets = torch_rand_float(0, 1e-4, (num_buckets, 1), device='cpu')
+                rolling_friction_buckets = torch_rand_float(0, 1e-4, (num_buckets, 1), device=self.device)
                 self.rolling_friction_coeffs = rolling_friction_buckets[bucket_ids]
                 self.all_friction_coeffs = torch.cat([self.friction_coeffs, self.rolling_friction_coeffs], dim=-1).to(
                     self.device)
@@ -315,8 +324,8 @@ class A1Base(VecTask):
                 self.torque_limits[i] *= \
                     self.cfg["task"]["randomization_params"]["actor_params"]["a1"]["dof_properties"][
                         "soft_dof_torque_limit"]
-                if self.dr_joint_friction:
-                    props["friction"][i] = np.abs(np.random.normal(0, self.cfg["task"]["domain_rand"]["joint_friction_std"]))
+                if self.domain_rand and self.dr_joint_friction:
+                    props["friction"][i] = np.abs(np.random.normal(0, self.domain_rand["joint_friction_std"]))
         return props
 
     def _process_rigid_body_props(self, props, env_id):
@@ -345,6 +354,7 @@ class A1Base(VecTask):
             self._reset_pd_gains(env_ids)
         self._refresh_sim_tensors()
         self._compute_observations(env_ids)
+        self._reset_obs(env_ids)
         self._reset_robot(env_ids)
         if self.domain_rand and self.dr_push_robot:
             self._reset_push(env_ids)
@@ -623,34 +633,41 @@ class A1Base(VecTask):
         return
 
     def _compute_observations(self, env_ids=None):
-        obs = self._compute_a1_obs(env_ids)
+        ob_curr = self._compute_a1_obs(env_ids)
 
         if self.add_noise:
-            obs += torch.rand_like(obs) * self.noise_scale_vec
+            # obs += torch.rand_like(obs) * self.noise_scale_vec
+            ob_curr += torch.rand_like(ob_curr) * self.noise_scale_vec
 
         if (env_ids is None):
-            self.obs_buf[:] = obs
+            # self.obs_buf[:] = self.obs
+            self._states_history[:] = self._states_history.roll(-1, 1)
+            self._actions_history[:] = self._actions_history.roll(-1, 1)
+            self._states_history[:, -1, :] = ob_curr
+            self._actions_history[:, -1, :] = self.actions
         else:
-            self.obs_buf[env_ids] = obs
+            # self.obs_buf[env_ids] = self.obs[env_ids]
+            self._states_history[env_ids] = self._states_history[env_ids].roll(-1, 1)
+            self._actions_history[env_ids] = self._actions_history[env_ids].roll(-1, 1)
+            self._states_history[env_ids, -1, :] = ob_curr
+            self._actions_history[env_ids, -1, :] = self.actions[env_ids, :]
 
         return
 
     def _compute_a1_obs(self, env_ids=None):
         if (env_ids is None):
-            root_states = self._root_states
+            root_quat = self._root_states[:, 3:7]
             dof_pos = self._dof_pos
-            dof_vel = self._dof_vel
-            key_body_pos = self._rigid_body_pos[:, self._key_body_ids, :]
+            # self._curr_obs[:] = torch.cat([root_quat, dof_pos], dim=-1)
+
         else:
-            root_states = self._root_states[env_ids]
+            root_quat = self._root_states[env_ids, 3:7]
             dof_pos = self._dof_pos[env_ids]
-            dof_vel = self._dof_vel[env_ids]
-            key_body_pos = self._rigid_body_pos[env_ids][:, self._key_body_ids, :]
+            # self._curr_obs[env_ids] = torch.cat([root_quat, dof_pos], dim=-1)
 
-        obs = compute_a1_observations(root_states, dof_pos, dof_vel,
-                                      key_body_pos, self._local_root_obs)
+        ob_curr = torch.cat([root_quat, dof_pos], dim=-1)
 
-        return obs
+        return ob_curr
 
     def _reset_actors(self, env_ids):
         self._dof_pos[env_ids] = self._initial_dof_pos[env_ids]
@@ -673,6 +690,11 @@ class A1Base(VecTask):
     def _reset_robot(self, env_ids):
         start_dof_pos = self._dof_pos[env_ids]
         self.action_filter.reset(env_ids, start_dof_pos)
+
+    def _reset_obs(self, env_ids):
+        self._actions_history[env_ids] = 0.
+        self._states_history[env_ids] = self._states_history[env_ids, -1:, :]
+        # self.obs_buf[env_ids] = self.obs[env_ids]
 
     def _compute_torques(self, pd_tar):
         """compute torques from actions.
@@ -729,14 +751,7 @@ class A1Base(VecTask):
 
         self.extras["time_outs"] = self.timeout_buf.to(self.rl_device)
 
-        if self.history_steps is not None:
-            obs_buf = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
-            done_env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
-            self.obs_buf_history.reset(done_env_ids, obs_buf[done_env_ids])
-            self.obs_buf_history.insert(obs_buf)
-            self.obs_dict["obs"] = self.obs_buf_history.get_obs_vec(np.arange(self.history_steps))
-        else:
-            self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+        self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
 
         # asymmetric actor-critic
         if self.num_states > 0:
