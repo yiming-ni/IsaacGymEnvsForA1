@@ -45,6 +45,7 @@ DOF_OFFSETS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 NUM_OBS = (16 + 12) * 15 + 16  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
 # base_height, base_orientation=4, base_angular_vel=3, joint_pos=12, joint_velocity=12
 # orientation, joint_pos, 4+12+history
+NUM_CURR_OBS = 16
 NUM_ACTIONS = 12
 
 # action 30hz
@@ -193,10 +194,13 @@ class A1Base(VecTask):
         self._rigid_body_ang_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[..., 10:13]
         self._contact_forces = gymtorch.wrap_tensor(contact_force_tensor).view(self.num_envs, self.num_bodies+self.num_markers, 3)
 
-        self._states_history = torch.zeros((self.num_envs, self.history_steps, 16), device=self.device) # base_quat(4) + dof_pos(12)
-        self._actions_history = torch.zeros((self.num_envs, self.history_steps, 12), device=self.device) # dof_pos(12)
+        # self._states_history = torch.zeros((self.num_envs, self.history_steps, 16), device=self.device) # base_quat(4) + dof_pos(12)
+        # self._actions_history = torch.zeros((self.num_envs, self.history_steps, 12), device=self.device) # dof_pos(12)
         self.actions = torch.zeros((self.num_envs, self.num_actions), device=self.device)
-
+        self.obs = torch.zeros((self.num_envs, NUM_OBS), device=self.device)
+        self._states_history = self.obs[:, :-NUM_CURR_OBS].view(self.num_envs, self.history_steps, -1)[:, :, :NUM_CURR_OBS]
+        self._actions_history = self.obs[:, :-NUM_CURR_OBS].view(self.num_envs, self.history_steps, -1)[:, :, NUM_CURR_OBS:]
+        self._curr_obs = self.obs[:, -NUM_CURR_OBS:]
 
         self._terminate_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
         # track goal progress
@@ -344,8 +348,8 @@ class A1Base(VecTask):
         if self.domain_rand and self.dr_pd:
             self._reset_pd_gains(env_ids)
         self._refresh_sim_tensors()
+        self._compute_observations(env_ids)
         self._reset_obs(env_ids)
-        # self._compute_observations(env_ids)
         return
 
     def _reset_pd_gains(self, env_ids):
@@ -636,20 +640,22 @@ class A1Base(VecTask):
         return
 
     def _compute_observations(self, env_ids=None):
-        obs, ob_curr = self._compute_a1_obs(env_ids)
-        self._states_history = self._states_history.roll(-1, 1)
-        self._actions_history = self._actions_history.roll(-1, 1)
+        self._compute_a1_obs(env_ids)
 
         if self.add_noise:
             obs += torch.rand_like(obs) * self.noise_scale_vec
 
         if (env_ids is None):
-            self.obs_buf[:] = obs
-            self._states_history[:, -1, :] = ob_curr[:, :]
+            self.obs_buf[:] = self.obs
+            self._states_history[...] = self._states_history.roll(-1, 1)
+            self._actions_history[...] = self._actions_history.roll(-1, 1)
+            self._states_history[:, -1, :] = self._curr_obs[:, :]
             self._actions_history[:, -1, :] = self.actions[:, :]
         else:
-            self.obs_buf[env_ids] = obs
-            self._states_history[env_ids, -1, :] = ob_curr[:, :]
+            self.obs_buf[env_ids] = self.obs[env_ids]
+            self._states_history[env_ids, ...] = self._states_history.roll(-1, 1)[env_ids]
+            self._actions_history[env_ids, ...] = self._actions_history.roll(-1, 1)[env_ids]
+            self._states_history[env_ids, -1, :] = self._curr_obs[env_ids, :]
             self._actions_history[env_ids, -1, :] = self.actions[env_ids, :]
 
         return
@@ -658,18 +664,19 @@ class A1Base(VecTask):
         if (env_ids is None):
             root_quat = self._root_states[:, 3:7]
             dof_pos = self._dof_pos
-            ob_prev = torch.cat([self._states_history.flatten(1, 2), self._actions_history.flatten(1, 2)], dim=-1)
+            self._curr_obs[:] = torch.cat([root_quat, dof_pos], dim=-1)
+            # ob_prev = torch.cat([self._states_history.flatten(1, 2), self._actions_history.flatten(1, 2)], dim=-1)
 
         else:
             root_quat = self._root_states[env_ids, 3:7]
             dof_pos = self._dof_pos[env_ids]
-            ob_prev = torch.cat([self._states_history.flatten(1, 2), self._actions_history.flatten(1, 2)], dim=-1)
-            ob_prev = ob_prev[env_ids]
+            self._curr_obs[env_ids] = torch.cat([root_quat, dof_pos], dim=-1)
+            # ob_prev = torch.cat([self._states_history.flatten(1, 2), self._actions_history.flatten(1, 2)], dim=-1)
+            # ob_prev = ob_prev[env_ids]
 
-        ob_curr = torch.cat([root_quat, dof_pos], dim=-1)
-        obs = torch.cat([ob_prev, ob_curr], dim=-1)
+        # obs = torch.cat([ob_prev, ob_curr], dim=-1)
 
-        return obs, ob_curr
+        return
 
     def _reset_actors(self, env_ids):
         self._dof_pos[env_ids] = self._initial_dof_pos[env_ids]
@@ -690,14 +697,13 @@ class A1Base(VecTask):
         return
 
     def _reset_obs(self, env_ids):
-        self.actions[env_ids, :] = 0
-        self._actions_history[env_ids, :, :] = 0.
-        self._states_history[env_ids, :, :] = 0.
-        ob_curr = torch.cat([self._root_states[env_ids, 3:7], self._dof_pos[env_ids]], dim=-1)
-        self._states_history[env_ids, :, :] = ob_curr.unsqueeze(-2).expand(len(env_ids), self._states_history.shape[1], -1)
-        ob_prev = torch.cat([self._states_history[env_ids].flatten(1, 2), self._actions_history[env_ids].flatten(1, 2)], dim=-1)
-        obs = torch.cat([ob_prev, ob_curr], dim=-1)
-        self.obs_buf[env_ids] = obs
+        self._actions_history[env_ids] = 0.
+        self._states_history[env_ids] = self._states_history[env_ids, -1:, :]
+        # ob_curr = torch.cat([self._root_states[env_ids, 3:7], self._dof_pos[env_ids]], dim=-1)
+        # self._states_history[env_ids, :, :] = ob_curr.unsqueeze(-2).expand(len(env_ids), self._states_history.shape[1], -1)
+        # ob_prev = torch.cat([self._states_history[env_ids].flatten(1, 2), self._actions_history[env_ids].flatten(1, 2)], dim=-1)
+        # obs = torch.cat([ob_prev, ob_curr], dim=-1)
+        self.obs_buf[env_ids] = self.obs[env_ids]
 
     def _compute_torques(self, pd_tar):
         """compute torques from actions.
