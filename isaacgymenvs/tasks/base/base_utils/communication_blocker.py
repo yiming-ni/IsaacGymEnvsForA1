@@ -17,18 +17,21 @@ class CommunicationBlocker():
         self.num_env = num_env
         self.hold_flag = torch.zeros(self.num_env, dtype=torch.bool, device=self.device)
         self.prev_hold_flag = torch.zeros(self.num_env, dtype=torch.bool, device=self.device)
-        self.held_msg = copy.deepcopy(struct)
-        self.blank_msg = copy.deepcopy(struct)
+        # self.held_msg = copy.deepcopy(struct)
+        # self.blank_msg = copy.deepcopy(struct)
+        self.held_msg = torch.zeros_like(struct, dtype=torch.float, device=self.device)
+        self.blank_msg = torch.zeros_like(struct, dtype=torch.float, device=self.device)
+        self.held_msg[:] = struct[:]
+        self.blank_msg[:] = struct[:]
         self.held_count = torch.zeros(self.num_env, dtype=torch.int32, device=self.device)
         self.held_buffer_size = torch.zeros(self.num_env, dtype=torch.int32, device=self.device)
 
-    def reset(self, env_ids):
+    def reset(self, env_ids, start_msg=None):
         self.hold_flag[env_ids] = False
         self.prev_hold_flag[env_ids] = False
-        if isinstance(self.held_msg, torch.Tensor):
-            self.held_msg[env_ids] = 0.
-        else:
-            self.held_msg.update(env_ids, self.blank_msg)
+        if start_msg is not None:
+            self.blank_msg[env_ids] = start_msg
+        self.held_msg[env_ids] = self.blank_msg[env_ids]
         self.held_count[env_ids] = 0
         self.held_buffer_size[env_ids] = 0
 
@@ -39,24 +42,17 @@ class CommunicationBlocker():
         # ------------- start hold ---------------
         mask = self.hold_flag & ~self.prev_hold_flag
 
-        if isinstance(self.held_msg, torch.Tensor):
-            self.held_msg[mask] = msg_to_send[mask]
-        else:
-            self.held_msg.update(mask, msg_to_send)
+        self.held_msg[mask] = msg_to_send[mask]
 
         self.held_count[mask] = 0
         self.held_buffer_size[mask] = (
-                    torch.round(torch.rand(torch.sum(mask), device=self.device) * self.max_buffer_size) + 10).to(
+                    torch.round(torch.rand(torch.sum(mask), device=self.device) * self.max_buffer_size[mask]) + 10).to(
             torch.int32)
 
         # ------------- hold ---------------
         mask = self.hold_flag
-        if isinstance(self.held_msg, torch.Tensor):
-            msg_sent[mask] = self.held_msg[mask]
-            msg_sent[~mask] = msg_to_send[~mask]
-        else:
-            msg_sent.update(mask, self.held_msg)
-            msg_sent.update(~mask, msg_to_send)
+        msg_sent[mask] = self.held_msg[mask]
+        msg_sent[~mask] = msg_to_send[~mask]
         self.held_count[mask] = self.held_count[mask] + 1
         self.prev_hold_flag[:] = self.hold_flag[:]
 

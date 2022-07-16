@@ -196,10 +196,14 @@ class A1Base(VecTask):
         self._contact_forces = gymtorch.wrap_tensor(contact_force_tensor).view(self.num_envs, self.num_bodies+self.num_markers, 3)
 
         self.actions = torch.zeros((self.num_envs, self.num_actions), device=self.device)
-        # self.obs = torch.zeros((self.num_envs, NUM_OBS), device=self.device)
-        # self._states_history = self.obs[:, :-NUM_CURR_OBS].view(self.num_envs, self.history_steps, -1)[:, :, :NUM_CURR_OBS]
-        # self._actions_history = self.obs[:, :-NUM_CURR_OBS].view(self.num_envs, self.history_steps, -1)[:, :, NUM_CURR_OBS:]
-        # self._curr_obs = self.obs[:, -NUM_CURR_OBS:]
+
+        self.add_delay = self.cfg["task"]["noise"]["add_delay"]
+        self.action_blocker = CommunicationBlocker(self.num_envs, 1. / dt, self.cfg["task"]["noise"]["delay_bound"],
+                                                   self._dof_pos, prob=0.1, device=self.device)  # freq = sim freq
+        ob_curr = torch.cat([self._root_states[:, 3:7], self._dof_pos], dim=-1)
+        self.obs_state_blocker = CommunicationBlocker(self.num_envs, 1. / self.dt, self.cfg["task"]["noise"]["delay_bound"],
+                                                      ob_curr, prob=0.1, device=self.device)  # freq = policy freq
+
         states_idx = NUM_CURR_OBS*(self.history_steps+1)
         self._states_history = self.obs_buf[:, :states_idx].view(self.num_envs, self.history_steps+1, -1)  # last entry is current obs
         self._actions_history = self.obs_buf[:, states_idx:].view(self.num_envs, self.history_steps, -1)
@@ -214,9 +218,6 @@ class A1Base(VecTask):
 
         if self._pd_control:
             self._build_pd_action_offset_scale()
-
-        # env_ids = torch.arange(0, self.num_envs, device=self.device)
-        # self.action_filter.reset(env_ids, self._pd_target_to_action(initial_dof.expand(self.num_envs, -1)))
 
         return
 
@@ -648,6 +649,8 @@ class A1Base(VecTask):
             obs += torch.rand_like(obs) * self.noise_scale_vec
 
         if (env_ids is None):
+            if self.add_delay:
+                ob_curr = self.obs_state_blocker.send_msg(ob_curr)
             # self.obs_buf[:] = self.obs
             self._states_history[:] = self._states_history.roll(-1, 1)
             self._actions_history[:] = self._actions_history.roll(-1, 1)
@@ -666,12 +669,10 @@ class A1Base(VecTask):
         if (env_ids is None):
             root_quat = self._root_states[:, 3:7]
             dof_pos = self._dof_pos
-            # self._curr_obs[:] = torch.cat([root_quat, dof_pos], dim=-1)
 
         else:
             root_quat = self._root_states[env_ids, 3:7]
             dof_pos = self._dof_pos[env_ids]
-            # self._curr_obs[env_ids] = torch.cat([root_quat, dof_pos], dim=-1)
 
         ob_curr = torch.cat([root_quat, dof_pos], dim=-1)
 
@@ -695,6 +696,13 @@ class A1Base(VecTask):
         self._terminate_buf[env_ids] = 0
         return
 
+    def _reset_robot(self, env_ids):
+        start_dof_pos = self._dof_pos[env_ids]
+        self.action_filter.reset(env_ids, start_dof_pos)
+        self.action_blocker.reset(env_ids, start_dof_pos)
+        start_obs = self._states_history[env_ids, -1, :]
+        self.obs_state_blocker.reset(env_ids, start_obs)
+
     def _reset_obs(self, env_ids):
         self._actions_history[env_ids] = 0.
         self._states_history[env_ids] = self._states_history[env_ids, -1:, :]
@@ -708,6 +716,10 @@ class A1Base(VecTask):
         returns: torques sent to the simulation
         """
         control_type = self.cfg["control"].get("control_type", "P")
+
+        if self.add_delay:
+            pd_tar = self.action_blocker.send_msg(pd_tar)
+
         if self.domain_rand and self.dr_pd:
             p_gains = self.randomized_p_gains
             d_gains = self.randomized_d_gains
@@ -729,7 +741,8 @@ class A1Base(VecTask):
 
     def step(self, actions):
         action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
-        self.actions = action_tensor.to(self.device).clone()
+        # self.actions = action_tensor.to(self.device).clone()
+        self.actions[:] = action_tensor[:]
         # step physics and render each frame
         self.render()
         pd_tar = self._action_to_pd_targets(self.actions)
