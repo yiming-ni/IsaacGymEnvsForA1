@@ -84,9 +84,6 @@ class A1Base(VecTask):
         self.cfg["env"]["numObservations"] = self.get_obs_size()
         self.cfg["env"]["numActions"] = self.get_action_size()
 
-        # add marker if true
-        self.add_markers = self.cfg["env"].get("addMarkers", False)
-
         super().__init__(config=self.cfg, sim_device=sim_device, graphics_device_id=graphics_device_id,
                          headless=headless)
 
@@ -115,14 +112,7 @@ class A1Base(VecTask):
         self.gym.refresh_rigid_body_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
 
-        if self.add_markers:
-            self.all_actor_indices = torch.arange(self.num_envs * (self.num_markers+1), dtype=torch.int32, device=self.device).reshape(
-                (self.num_envs, (self.num_markers+1)))  # TODO root_states
-            self._all_actor_root_states = gymtorch.wrap_tensor(actor_root_state)
-            self._root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 0, :]
-            self._marker_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 1:, :]
-        else:
-            self._root_states = gymtorch.wrap_tensor(actor_root_state)
+        self._get_root_states_from_tensor(actor_root_state)
 
         # self._root_states = gymtorch.wrap_tensor(actor_root_state)
         self._initial_root_states = self._root_states.clone()
@@ -178,6 +168,10 @@ class A1Base(VecTask):
         if self._pd_control:
             self._build_pd_action_offset_scale()
 
+        return
+
+    def _get_root_states_from_tensor(self, states_tensor):
+        self._root_states = gymtorch.wrap_tensor(states_tensor)
         return
 
     def get_obs_size(self):
@@ -285,19 +279,7 @@ class A1Base(VecTask):
         asset_options.disable_gravity = self.cfg["asset"]["disable_gravity"]
 
         # create marker options if add_markers is true
-        if self.add_markers:
-            marker_asset_options = gymapi.AssetOptions()
-            marker_asset_options.angular_damping = 0.0
-            marker_asset_options.max_angular_velocity = 4 * np.pi
-            marker_asset_options.slices_per_cylinder = 16
-
-            marker_asset_options.fix_base_link = True
-            marker_asset = self.gym.create_sphere(self.sim, 0.03, marker_asset_options)
-            init_marker_pos = gymapi.Transform()
-            init_marker_pos.p.z = 0.3
-            self.num_markers = 4
-        else:
-            self.num_markers = 0
+        marker_asset, marker_pos = self._create_marker_envs()
 
         a1_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
 
@@ -382,19 +364,7 @@ class A1Base(VecTask):
             handle = self.gym.create_actor(env_ptr, a1_asset, start_pose, "a1", i, contact_filter, 0)
 
             # create markers
-            if self.add_markers:
-                marker_handle_0 = self.gym.create_actor(env_ptr, marker_asset, init_marker_pos, "marker-0", i, 1, 0)
-                marker_handle_1 = self.gym.create_actor(env_ptr, marker_asset, init_marker_pos, "marker-1", i, 1, 0)
-                marker_handle_2 = self.gym.create_actor(env_ptr, marker_asset, init_marker_pos, "marker-2", i, 1, 0)
-                marker_handle_3 = self.gym.create_actor(env_ptr, marker_asset, init_marker_pos, "marker-3", i, 1, 0)
-                self.gym.set_rigid_body_color(env_ptr, marker_handle_0, 0, gymapi.MESH_VISUAL_AND_COLLISION,
-                                              gymapi.Vec3(1, 0, 0))  # red
-                self.gym.set_rigid_body_color(env_ptr, marker_handle_1, 0, gymapi.MESH_VISUAL_AND_COLLISION,
-                                              gymapi.Vec3(0, 1, 0))  # green
-                self.gym.set_rigid_body_color(env_ptr, marker_handle_2, 0, gymapi.MESH_VISUAL_AND_COLLISION,
-                                              gymapi.Vec3(0, 0, 1))  # blue
-                self.gym.set_rigid_body_color(env_ptr, marker_handle_3, 0, gymapi.MESH_VISUAL_AND_COLLISION,
-                                              gymapi.Vec3(1, 1, 1))  # white
+            self._create_marker_actors(env_ptr, marker_asset, marker_pos, i)
 
             # TODO below for computing torque limits
             self._process_dof_props(dof_props_asset, i)
@@ -434,6 +404,14 @@ class A1Base(VecTask):
         #     self._build_pd_action_offset_scale()
 
         return
+
+    def _create_marker_actors(self, env_ptr, marker_asset, init_marker_pos, i):
+        """overridden by subclasses"""
+        return
+
+    def _create_marker_envs(self):
+        self.num_markers = 0
+        return self.num_markers, self.num_markers
 
     def _build_pd_action_offset_scale(self):
         num_joints = len(DOF_OFFSETS) - 1
@@ -560,7 +538,6 @@ class A1Base(VecTask):
         # return torques
         return torch.clip(torques, -self.torque_limits, self.torque_limits)
 
-    # TODO for manual pd control
     def step(self, actions):
         if self.dr_randomizations.get('actions', None):
             actions = self.dr_randomizations['actions']['noise_lambda'](actions)
