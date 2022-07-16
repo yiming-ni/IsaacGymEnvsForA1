@@ -181,7 +181,7 @@ task:
     add_noise: True
     add_delay: True
     noise_level: 1.0 # scales other values
-    delay_bound: [1.0/2500.0, 1.0/40.0] #40
+    delay_bound: [0.0004, 0.025] #40
     noise_scales:
       base_quat: 0.01
       dof_pos: 0.01
