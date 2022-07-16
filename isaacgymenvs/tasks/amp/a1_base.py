@@ -30,6 +30,7 @@
 import numpy as np
 import os
 import torch
+import random
 
 from isaacgym import gymtorch
 from isaacgym import gymapi, gymutil
@@ -161,6 +162,9 @@ class A1Base(VecTask):
 
 
         self._terminate_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
+        # track goal progress
+        # self.goal_terminate = torch.randint(100, 200, (self.num_envs,), device=self.device, dtype=torch.int32)
+        # self.goal_step = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
 
         if self.viewer != None:
             self._init_camera()
@@ -278,8 +282,24 @@ class A1Base(VecTask):
         asset_options.thickness = self.cfg["asset"]["thickness"]
         asset_options.disable_gravity = self.cfg["asset"]["disable_gravity"]
 
+        # _goal_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 4.0 + 1.0
+        # _goal_rot = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * torch.pi * 2
+        # self._goal_pos = torch.zeros((self.num_envs, 2), dtype=torch.float, device=self.device)
+        # self._goal_pos[..., 0] = torch.flatten(_goal_dist * torch.cos(_goal_rot))
+        # self._goal_pos[..., 1] = torch.flatten(_goal_dist * torch.sin(_goal_rot))
         # create marker options if add_markers is true
+# <<<<<<< HEAD
         marker_asset, marker_pos = self._create_marker_envs()
+# =======
+#         if not self.headless:
+#             goal_asset_opts = gymapi.AssetOptions()
+#             goal_asset_opts.fix_base_link = True
+#             goal_asset = self.gym.create_sphere(self.sim, 0.03, goal_asset_opts)
+#             init_goal_pos = gymapi.Transform()
+#             self.num_markers = 1  # TODO for goal pos
+#         else:
+#             self.num_markers = 0
+# >>>>>>> testTask
 
         a1_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
 
@@ -549,38 +569,12 @@ class A1Base(VecTask):
         pd_tar = self._action_to_pd_targets(self.actions)
         for _ in range(self.control_freq_inv):
             self.torques = self._compute_torques(pd_tar).view(self.torques.shape)
-            # self.writer.add_scalar("torques/torque[0]", self.torques[0, 0], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[1]", self.torques[0, 1], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[2]", self.torques[0, 2], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[3]", self.torques[0, 3], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[4]", self.torques[0, 4], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[5]", self.torques[0, 5], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[6]", self.torques[0, 6], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[7]", self.torques[0, 7], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[8]", self.torques[0, 8], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[9]", self.torques[0, 9], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[10]", self.torques[0, 10], self.pd_iter)
-            # self.writer.add_scalar("torques/torque[11]", self.torques[0, 11], self.pd_iter)
-            # self.pd_iter += 1
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
             self.gym.simulate(self.sim)
             if self.device == 'cpu':
                 self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
 
-        # self.writer.add_scalar("actions/action[0]", pd_tar[0, 0], self.iter)
-        # self.writer.add_scalar("actions/action[1]", pd_tar[0, 1], self.iter)
-        # self.writer.add_scalar("actions/action[2]", pd_tar[0, 2], self.iter)
-        # self.writer.add_scalar("actions/action[3]", pd_tar[0, 3], self.iter)
-        # self.writer.add_scalar("actions/action[4]", pd_tar[0, 4], self.iter)
-        # self.writer.add_scalar("actions/action[5]", pd_tar[0, 5], self.iter)
-        # self.writer.add_scalar("actions/action[6]", pd_tar[0, 6], self.iter)
-        # self.writer.add_scalar("actions/action[7]", pd_tar[0, 7], self.iter)
-        # self.writer.add_scalar("actions/action[8]", pd_tar[0, 8], self.iter)
-        # self.writer.add_scalar("actions/action[9]", pd_tar[0, 9], self.iter)
-        # self.writer.add_scalar("actions/action[10]", pd_tar[0, 10], self.iter)
-        # self.writer.add_scalar("actions/action[11]", pd_tar[0, 11], self.iter)
-        # self.iter += 1
         # fill time out buffer
         self.timeout_buf = torch.where(self.progress_buf >= self.max_episode_length - 1,
                                        torch.ones_like(self.timeout_buf), torch.zeros_like(self.timeout_buf))

@@ -17,10 +17,6 @@ from isaacgym.torch_utils import *
 from isaacgymenvs.utils.torch_jit_utils import *
 
 
-NUM_AMP_OBS_PER_STEP = 1 + 6 + 3 + 3 + 12 + 12 + 4*3  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
-
-
-
 class TestMotion(A1AMP):
     def __init__(self, cfg, sim_device, graphics_device_id, headless):
         self.cfg = cfg
