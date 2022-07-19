@@ -18,7 +18,7 @@ from isaacgymenvs.utils.torch_jit_utils import *
 
 
 NUM_OBS = 1 + 6 + 3 + 3 + 12 + 12 + 4*3 + 2
-
+NUM_CURR_OBS = 16
 
 class A1Navigation(A1AMP):
     def __init__(self, cfg, sim_device, graphics_device_id, headless):
@@ -28,7 +28,26 @@ class A1Navigation(A1AMP):
         self.goal_step = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
 
     def get_obs_size(self):
-        return NUM_OBS
+        ob_size = super().get_obs_size()
+        return ob_size + 2
+
+    def _init_obs_tensors(self):
+        if self.history_steps is not None:
+            states_idx = NUM_CURR_OBS * (self.history_steps + 1)
+            self._states_history = self.obs_buf[:, :states_idx].view(self.num_envs, self.history_steps + 1,
+                                                                     -1)  # last entry is current obs
+            self._goal_xy = self.obs_buf[:, states_idx:states_idx+2]
+            self._actions_history = self.obs_buf[:, states_idx+2:].view(self.num_envs, self.history_steps, -1)
+        return
+
+    def _get_rigid_body_states_from_tensor(self, states_tensor):
+        if not self.headless:
+            self._all_actor_rb_states = gymtorch.wrap_tensor(states_tensor)
+            self.rb_states = self._all_actor_rb_states.view(self.num_envs, self.num_bodies + self.num_markers, -1)[..., :self.num_bodies, :]
+            self.marker_states = self._all_actor_rb_states.view(self.num_envs, self.num_bodies+self.num_markers, -1)[..., self.num_bodies:, :]
+        else:
+            super()._get_rigid_body_states_from_tensor(states_tensor)
+        return
 
     def _get_root_states_from_tensor(self, state_tensor):
         if not self.headless:
@@ -105,7 +124,7 @@ class A1Navigation(A1AMP):
         self.rew_buf[:] = compute_a1_reward(self._root_states[:, :2], self._goal_pos)
         return
 
-    def _compute_a1_obs(self, env_ids=None):
+    def _compute_a1_obs_full_states(self, env_ids=None):
         if (env_ids is None):
             goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
             goal_pos[..., 2] = 0.2
@@ -125,8 +144,36 @@ class A1Navigation(A1AMP):
 
         obs = compute_a1_observations(root_states, dof_pos, dof_vel,
                                       key_body_pos, self._local_root_obs, goal_pos)
-
         return obs
+
+    def _compute_a1_obs_reduced_states(self, env_ids=None):
+        if (env_ids is None):
+            root_states = self._root_states
+            root_quat = root_states[:, 3:7]
+            dof_pos = self._dof_pos
+            if self._local_root_obs:
+                root_quat = compute_local_root_quat(root_quat)
+            goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
+            goal_pos[..., 2] = 0.2
+            goal_pos[..., :2] = self._goal_pos
+            goal_xy = compute_goal_observations(root_states, goal_pos)
+            self._goal_xy = goal_xy
+
+        else:
+            root_states = self._root_states[env_ids]
+            root_quat = root_states[:, 3:7]
+            root_quat = self._root_states[env_ids, 3:7]
+            dof_pos = self._dof_pos[env_ids]
+            if self._local_root_obs:
+                root_quat = compute_local_root_quat(root_quat)
+            goal_pos = torch.zeros((len(env_ids), 3), dtype=torch.float, device=self.device)
+            goal_pos[..., 2] = 0.2
+            goal_pos[..., :2] = self._goal_pos[env_ids]
+            goal_xy = compute_goal_observations(root_states, goal_pos)
+            self._goal_xy[env_ids] = goal_xy
+
+        ob_curr = torch.cat([root_quat, dof_pos], dim=-1)
+        return ob_curr
 
     def post_physics_step(self):
         self.goal_step += 1
@@ -242,6 +289,27 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
                      flat_local_goal_xy),
                     dim=-1)
     return obs
+
+
+@torch.jit.script
+def compute_goal_observations(root_states, goal_pos):
+    # type: (Tensor, Tensor) -> Tensor
+    root_pos = root_states[:, 0:3]
+    root_rot = root_states[:, 3:7]
+
+    heading_rot = calc_heading_quat_inv(root_rot)
+
+    local_goal_pos = goal_pos - root_pos
+    local_target_pos = my_quat_rotate(heading_rot, local_goal_pos)
+    flat_local_goal_xy = local_target_pos[:, :2]
+
+    return flat_local_goal_xy
+
+@torch.jit.script
+def compute_local_root_quat(root_rot):
+    # type: (Tensor) -> Tensor
+    heading_rot = calc_heading_quat_inv(root_rot)
+    return quat_mul(heading_rot, root_rot)
 
 
 @torch.jit.script
