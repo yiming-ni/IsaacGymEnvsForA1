@@ -149,7 +149,7 @@ class A1Base(VecTask):
         self._dof_vel = self._dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
 
         # create wrapper tensor for rigid body
-        self.rb_states = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, self.num_bodies, -1)
+        self._get_rigid_body_states_from_tensor(rigid_body_state)
 
         # initiate noise
         self.add_noise = self.cfg["task"]["noise"]["add_noise"]
@@ -204,9 +204,7 @@ class A1Base(VecTask):
         self.obs_state_blocker = CommunicationBlocker(self.num_envs, 1. / self.dt, self.cfg["task"]["noise"]["delay_bound"],
                                                       ob_curr, prob=0.1, device=self.device)  # freq = policy freq
 
-        states_idx = NUM_CURR_OBS*(self.history_steps+1)
-        self._states_history = self.obs_buf[:, :states_idx].view(self.num_envs, self.history_steps+1, -1)  # last entry is current obs
-        self._actions_history = self.obs_buf[:, states_idx:].view(self.num_envs, self.history_steps, -1)
+        self._init_obs_tensors()
 
         self._terminate_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
         # track goal progress
@@ -219,6 +217,21 @@ class A1Base(VecTask):
         if self._pd_control:
             self._build_pd_action_offset_scale()
 
+        return
+
+    def _init_obs_tensors(self):
+        if self.history_steps is not None:
+            states_idx = NUM_CURR_OBS*(self.history_steps+1)
+            self._states_history = self.obs_buf[:, :states_idx].view(self.num_envs, self.history_steps+1, -1)  # last entry is current obs
+            self._actions_history = self.obs_buf[:, states_idx:].view(self.num_envs, self.history_steps, -1)
+        return
+
+    def _get_rigid_body_states_from_tensor(self, states_tensor):
+        self.rb_states = gymtorch.wrap_tensor(states_tensor).view(self.num_envs, self.num_bodies, -1)
+        return
+
+    def _get_root_states_from_tensor(self, states_tensor):
+        self._root_states = gymtorch.wrap_tensor(states_tensor)
         return
 
     def _get_noise_scale_vec(self, cfg):
@@ -666,16 +679,44 @@ class A1Base(VecTask):
         return
 
     def _compute_a1_obs(self, env_ids=None):
+        if self.history_steps is None:
+            ob_curr = self._compute_a1_obs_full_states(env_ids)
+
+        else:
+            ob_curr = self._compute_a1_obs_reduced_states(env_ids)
+
+        return ob_curr
+
+    def _compute_a1_obs_full_states(self, env_ids=None):
+        if (env_ids is None):
+            root_states = self._root_states
+            dof_pos = self._dof_pos
+            dof_vel = self._dof_vel
+            key_body_pos = self._rigid_body_pos[:, self._key_body_ids, :]
+        else:
+            root_states = self._root_states[env_ids]
+            dof_pos = self._dof_pos[env_ids]
+            dof_vel = self._dof_vel[env_ids]
+            key_body_pos = self._rigid_body_pos[env_ids][:, self._key_body_ids, :]
+
+        ob_curr = compute_a1_observations(root_states, dof_pos, dof_vel,
+                                          key_body_pos, self._local_root_obs)
+        return ob_curr
+
+    def _compute_a1_obs_reduced_states(self, env_ids=None):
         if (env_ids is None):
             root_quat = self._root_states[:, 3:7]
             dof_pos = self._dof_pos
+            if self._local_root_obs:
+                root_quat = compute_local_root_quat(root_quat)
 
         else:
             root_quat = self._root_states[env_ids, 3:7]
             dof_pos = self._dof_pos[env_ids]
+            if self._local_root_obs:
+                root_quat = compute_local_root_quat(root_quat)
 
         ob_curr = torch.cat([root_quat, dof_pos], dim=-1)
-
         return ob_curr
 
     def _reset_actors(self, env_ids):
@@ -986,6 +1027,12 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
                      flat_local_goal_xy),
                     dim=-1)
     return obs
+
+@torch.jit.script
+def compute_local_root_quat(root_rot):
+    # type: (Tensor) -> Tensor
+    heading_rot = calc_heading_quat_inv(root_rot)
+    return quat_mul(heading_rot, root_rot)
 
 
 @torch.jit.script
