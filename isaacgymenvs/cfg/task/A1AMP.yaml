@@ -192,6 +192,5 @@ task:
       height_measurements: 0.1
 
   actrion_filter: False
-  blocker: False
 
 
