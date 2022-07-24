@@ -1,1 +1,5 @@
-motions: [{"file": "a1_ig_ofstv1_pace.json", "weight": 0.3}, {"file" : "a1_ig_ofstv1_trot2.json", "weight": 0.4}, {"file": "a1_ig_ofstv1_rightturn0.json", "weight": 0.3}]
+motions: [{"file": "a1_ig_ofstv1_pace.json", "weight": 1.0},
+          {"file" : "a1_ig_ofstv1_trot2.json", "weight": 1.0},
+          {"file": "a1_ig_ofstv1_rightturn0.json", "weight": 1.0},
+          {"file": "a1_ig_ofstv1_stationary.json", "weight": 0.2}
+]
