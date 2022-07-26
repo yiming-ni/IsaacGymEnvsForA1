@@ -27,7 +27,7 @@ env:
   # animation files to learn from
   motion_file: "dataset.yaml"
 #  motion_file: "a1_ig_ofstv1_pace.json"
-#  motion_file: "a1_ig_ofstv1_trot.json"
+#  motion_file: "a1_ig_ofstv1_trot2.json"
 
   # these motions should use hyperparameters from HumanoidAMPPPO.yaml
   #motion_file: "amp_humanoid_run.npy"
@@ -191,6 +191,5 @@ task:
       gravity: 0.05
       height_measurements: 0.1
 
-  actrion_filter: False
-
+  action_filter: False
 
