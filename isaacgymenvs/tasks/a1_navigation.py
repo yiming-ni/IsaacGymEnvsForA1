@@ -79,7 +79,7 @@ class A1Navigation(A1AMP):
         return
 
     def _create_marker_envs(self):
-        _goal_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 4.0 + 1.0
+        _goal_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 9.0 + 1.0
         _goal_rot = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self._goal_pos = torch.zeros((self.num_envs, 2), dtype=torch.float, device=self.device)
         self._goal_pos[..., 0] = torch.flatten(_goal_dist * torch.cos(_goal_rot))
@@ -189,7 +189,7 @@ class A1Navigation(A1AMP):
         self.goal_terminate[goal_reset_envs] = torch.randint(100, 200, (len(goal_reset_envs),), device=self.device,
                                                              dtype=torch.int32)
         self.goal_step[goal_reset_envs] = 0
-        goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 4.0 + 1.0
+        goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 9.0 + 1.0
         goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot))
         self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot))
@@ -320,7 +320,7 @@ def compute_a1_reward(root_xy, goal_xy):
 
     x_diff = root_xy[:, 0] - goal_xy[:, 0]
     y_diff = root_xy[:, 1] - goal_xy[:, 1]
-    reward = torch.exp(- x_diff * x_diff * 0.5 - y_diff * y_diff / 0.5)
+    reward = torch.exp(- x_diff * x_diff * 0.5 - y_diff * y_diff * 0.5)
     return reward
 
 
