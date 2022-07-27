@@ -40,8 +40,10 @@ from tasks.ingenuity import Ingenuity
 from tasks.quadcopter import Quadcopter
 from tasks.shadow_hand import ShadowHand
 from tasks.trifinger import Trifinger
-from tasks.a1_amp import A1AMP, TestMotion
+from tasks.a1_amp import A1AMP
 from tasks.amp.a1_base import A1Base, A1BaseTrial
+from tasks.test_motion import TestMotion
+from tasks.a1_navigation import A1Navigation
 
 # Mappings from strings to environments
 isaacgym_task_map = {
@@ -62,5 +64,6 @@ isaacgym_task_map = {
     "A1Base": A1Base,
     "A1BaseTrial": A1BaseTrial,
     "TestMotion": TestMotion,
-    "TestHumanoidMotion": TestHumanoidMotion
+    "TestHumanoidMotion": TestHumanoidMotion,
+    "A1Navigation": A1Navigation
 }

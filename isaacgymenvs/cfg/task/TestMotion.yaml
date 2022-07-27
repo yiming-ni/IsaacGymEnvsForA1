@@ -26,7 +26,7 @@ env:
 
   # animation files to learn from
   # these motions should use hyperparameters from HumanoidAMPPPO.yaml
-  motion_file: "a1_ig_ofstv1_right turn0.json"
+  motion_file: "a1_ig_ofstv1_trot2.json"
   #motion_file: "amp_humanoid_run.npy"
   #motion_file: "amp_humanoid_dance.npy"
 
@@ -163,3 +163,28 @@ task:
           soft_dof_pos_limit: 1
           soft_dof_torque_limit: 1
 
+  domain_rand:
+    randomize_friction: False
+    friction_range: [ 1.0, 5.0 ]
+    randomize_joint_friction: False
+    joint_friction_std: 0.01
+    randomize_base_mass: False
+    mass_ratio_range: 0.5
+    inertia_ratio_range: 0.2
+    randomize_PD: False
+    push_robots: False
+    push_interval_s: 0.2
+
+  noise:
+    add_noise: False
+    add_delay: False
+    noise_level: 1.0 # scales other values
+    delay_bound: [ 0.0004, 0.025 ] #40
+    noise_scales:
+      base_quat: 0.01
+      dof_pos: 0.01
+      dof_vel: 0.05
+      gravity: 0.05
+      height_measurements: 0.1
+
+  actrion_filter: False
