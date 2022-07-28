@@ -203,10 +203,12 @@ class A1Navigation(A1AMP):
                                                          gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
 
     def reset_idx(self, env_ids):
-        self._reset_actors(env_ids)
         self._reset_goal_pos(env_ids)
-        self._refresh_sim_tensors()
-        self._compute_observations(env_ids)
+        super().reset_idx(env_ids)
+        # self._reset_actors(env_ids)
+        # self._reset_goal_pos(env_ids)
+        # self._refresh_sim_tensors()
+        # self._compute_observations(env_ids)
         return
 
 
