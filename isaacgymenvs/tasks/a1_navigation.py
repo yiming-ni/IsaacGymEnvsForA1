@@ -203,10 +203,12 @@ class A1Navigation(A1AMP):
                                                          gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
 
     def reset_idx(self, env_ids):
-        self._reset_actors(env_ids)
         self._reset_goal_pos(env_ids)
-        self._refresh_sim_tensors()
-        self._compute_observations(env_ids)
+        super().reset_idx(env_ids)
+        # self._reset_actors(env_ids)
+        # self._reset_goal_pos(env_ids)
+        # self._refresh_sim_tensors()
+        # self._compute_observations(env_ids)
         return
 
 
@@ -320,7 +322,7 @@ def compute_a1_reward(root_xy, goal_xy):
 
     x_diff = root_xy[:, 0] - goal_xy[:, 0]
     y_diff = root_xy[:, 1] - goal_xy[:, 1]
-    reward = torch.exp(- x_diff * x_diff * 0.5 - y_diff * y_diff / 0.5)
+    reward = torch.exp(- x_diff * x_diff * 0.5 - y_diff * y_diff * 0.5)
     return reward
 
 
