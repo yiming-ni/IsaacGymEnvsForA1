@@ -651,6 +651,7 @@ class A1Base(VecTask):
             if (env_ids is None):
                 if self.add_delay:
                     ob_curr = self.obs_state_blocker.send_msg(ob_curr)
+                    # print(ob_curr)
                 # self.obs_buf[:] = self.obs
                 self._states_history[:] = self._states_history.roll(-1, 1)
                 self._actions_history[:] = self._actions_history.roll(-1, 1)
@@ -729,9 +730,9 @@ class A1Base(VecTask):
             start_dof_pos = self._dof_pos[env_ids]
             self.action_filter.reset(env_ids, start_dof_pos)
         if self.add_delay:
-            self.action_blocker.reset(env_ids, start_dof_pos)
-            start_obs = self._states_history[env_ids, -1, :]
-            self.obs_state_blocker.reset(env_ids, start_obs)
+            self.action_blocker.reset(env_ids)
+            # start_obs = self._states_history[env_ids, -1, :]
+            self.obs_state_blocker.reset(env_ids)
 
     def _reset_obs(self, env_ids):
         self._actions_history[env_ids] = 0.
@@ -746,9 +747,6 @@ class A1Base(VecTask):
         returns: torques sent to the simulation
         """
         control_type = self.cfg["control"].get("control_type", "P")
-
-        if self.add_delay:
-            pd_tar = self.action_blocker.send_msg(pd_tar)
 
         if self.domain_rand and self.dr_pd:
             p_gains = self.randomized_p_gains
@@ -778,6 +776,8 @@ class A1Base(VecTask):
         pd_tar = self._action_to_pd_targets(self.actions)
         if self.include_af:
             pd_tar = self.action_filter.filter(pd_tar)
+        if self.add_delay:
+            pd_tar = self.action_blocker.send_msg(pd_tar)
         for _ in range(self.control_freq_inv):
             self.torques = self._compute_torques(pd_tar).view(self.torques.shape)
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))

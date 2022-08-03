@@ -24,7 +24,7 @@ class A1Navigation(A1AMP):
     def __init__(self, cfg, sim_device, graphics_device_id, headless):
         super().__init__(cfg, sim_device, graphics_device_id, headless)
         # track goal progress
-        self.goal_terminate = torch.randint(100, 200, (self.num_envs,), device=self.device, dtype=torch.int32)
+        self.goal_terminate = torch.randint(100, 300, (self.num_envs,), device=self.device, dtype=torch.int32)
         self.goal_step = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
 
     def get_obs_size(self):
@@ -79,7 +79,7 @@ class A1Navigation(A1AMP):
         return
 
     def _create_marker_envs(self):
-        _goal_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 9.0 + 1.0
+        _goal_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 5.0
         _goal_rot = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self._goal_pos = torch.zeros((self.num_envs, 2), dtype=torch.float, device=self.device)
         self._goal_pos[..., 0] = torch.flatten(_goal_dist * torch.cos(_goal_rot))
@@ -121,7 +121,7 @@ class A1Navigation(A1AMP):
         return
 
     def _compute_reward(self, actions):
-        self.rew_buf[:] = compute_a1_reward(self._root_states[:, :2], self._goal_pos)
+        self.rew_buf[:] = compute_a1_reward(self._root_states[:, :2], self._prev_root_states[:, :2], self._goal_pos, self.dt, self.device)
         return
 
     def _compute_a1_obs_full_states(self, env_ids=None):
@@ -177,6 +177,7 @@ class A1Navigation(A1AMP):
 
     def post_physics_step(self):
         self.goal_step += 1
+        self._prev_root_states[:] = self._root_states[:]
         super().post_physics_step()
         # reset goal pos
         goal_reset_envs = (self.goal_step >= self.goal_terminate).nonzero(as_tuple=False).flatten()
@@ -186,10 +187,10 @@ class A1Navigation(A1AMP):
         return
 
     def _reset_goal_pos(self, goal_reset_envs):
-        self.goal_terminate[goal_reset_envs] = torch.randint(100, 200, (len(goal_reset_envs),), device=self.device,
+        self.goal_terminate[goal_reset_envs] = torch.randint(100, 300, (len(goal_reset_envs),), device=self.device,
                                                              dtype=torch.int32)
         self.goal_step[goal_reset_envs] = 0
-        goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 9.0 + 1.0
+        goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 5.0
         goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot))
         self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot))
@@ -315,14 +316,22 @@ def compute_local_root_quat(root_rot):
 
 
 @torch.jit.script
-def compute_a1_reward(root_xy, goal_xy):
-    # type: (Tensor, Tensor) -> Tensor
-    # without task reward
-    # reward = torch.ones_like(obs_buf[:, 0])
+def compute_a1_reward(root_xy, prev_root_xy, goal_xy, dt, device):
+    # type: (Tensor, Tensor, Tensor, float, Optional[Device]) -> Tensor
 
-    x_diff = root_xy[:, 0] - goal_xy[:, 0]
-    y_diff = root_xy[:, 1] - goal_xy[:, 1]
-    reward = torch.exp(- x_diff * x_diff * 0.5 - y_diff * y_diff * 0.5)
+    x_diff = goal_xy[:, 0] - root_xy[:, 0]
+    y_diff = goal_xy[:, 1] - root_xy[:, 1]
+    dist = x_diff * x_diff + y_diff * y_diff
+    dist_reward = torch.exp(- dist * 0.5)
+
+    v1 = (root_xy[:, 0] - prev_root_xy[:, 0]) / dt
+    v2 = (root_xy[:, 1] - prev_root_xy[:, 1]) / dt
+    d_len = torch.sqrt_(x_diff * x_diff + y_diff * y_diff)
+    d1 = x_diff / d_len
+    d2 = y_diff / d_len
+    vel_reward = torch.exp(- torch.maximum(torch.zeros_like(v1, dtype=torch.float, device=device), 1.0 - (d1 * v1 + d2 * v2)) ** 2)
+    vel_reward = torch.where(dist > 0.25, vel_reward, torch.ones_like(vel_reward))
+    reward = 0.7 * dist_reward + 0.3 * vel_reward
     return reward
 
 
