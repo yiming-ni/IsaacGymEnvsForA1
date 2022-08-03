@@ -10,8 +10,7 @@ class CommunicationBlocker():
         If action, input sim_freq, if obs, input pol_freq
         '''
         self.device = device
-        t_delay = torch.zeros(num_env, device=self.device).uniform_(delay_bound[0], delay_bound[
-            1])  # delay from 2200 hz to 40 hz, udp will be running at 2000Hz realtime
+        t_delay = torch.zeros(num_env, device=self.device).uniform_(delay_bound[0], delay_bound[1])  # delay from 2200 hz to 40 hz, udp will be running at 2000Hz realtime
         self.max_buffer_size = torch.round(t_delay * freq).long()
         self.prob = prob
         self.num_env = num_env
@@ -26,12 +25,21 @@ class CommunicationBlocker():
         self.held_count = torch.zeros(self.num_env, dtype=torch.int32, device=self.device)
         self.held_buffer_size = torch.zeros(self.num_env, dtype=torch.int32, device=self.device)
 
-    def reset(self, env_ids, start_msg=None):
+    # def reset(self, env_ids, start_msg=None):
+    #     self.hold_flag[env_ids] = False
+    #     self.prev_hold_flag[env_ids] = False
+    #     if start_msg is not None:
+    #         self.blank_msg[env_ids] = start_msg
+    #     self.held_msg[env_ids] = self.blank_msg[env_ids]
+    #     self.held_count[env_ids] = 0
+    #     self.held_buffer_size[env_ids] = 0
+
+    def reset(self, env_ids):
         self.hold_flag[env_ids] = False
         self.prev_hold_flag[env_ids] = False
-        if start_msg is not None:
-            self.blank_msg[env_ids] = start_msg
-        self.held_msg[env_ids] = self.blank_msg[env_ids]
+
+        self.held_msg[env_ids] = 0.
+
         self.held_count[env_ids] = 0
         self.held_buffer_size[env_ids] = 0
 
@@ -46,7 +54,7 @@ class CommunicationBlocker():
 
         self.held_count[mask] = 0
         self.held_buffer_size[mask] = (
-                    torch.round(torch.rand(torch.sum(mask), device=self.device) * self.max_buffer_size[mask]) + 10).to(
+                    torch.round(torch.rand(torch.sum(mask), device=self.device) * self.max_buffer_size[mask])).to(
             torch.int32)
 
         # ------------- hold ---------------
