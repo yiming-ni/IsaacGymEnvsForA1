@@ -24,7 +24,7 @@ class A1Navigation(A1AMP):
     def __init__(self, cfg, sim_device, graphics_device_id, headless):
         super().__init__(cfg, sim_device, graphics_device_id, headless)
         # track goal progress
-        self.goal_terminate = torch.randint(100, 300, (self.num_envs,), device=self.device, dtype=torch.int32)
+        self.goal_terminate = torch.randint(100, 200, (self.num_envs,), device=self.device, dtype=torch.int32)
         self.goal_step = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
 
     def get_obs_size(self):
@@ -43,10 +43,40 @@ class A1Navigation(A1AMP):
     def _get_rigid_body_states_from_tensor(self, states_tensor):
         if not self.headless:
             self._all_actor_rb_states = gymtorch.wrap_tensor(states_tensor)
-            self.rb_states = self._all_actor_rb_states.view(self.num_envs, self.num_bodies + self.num_markers, -1)[..., :self.num_bodies, :]
-            self.marker_states = self._all_actor_rb_states.view(self.num_envs, self.num_bodies+self.num_markers, -1)[..., self.num_bodies:, :]
+            self._all_actor_rb_states = self._all_actor_rb_states.view(self.num_envs, self.num_bodies+self.num_markers, -1)
+            self.rb_states = self._all_actor_rb_states[..., :self.num_bodies, :]
+            self.marker_states = self._all_actor_rb_states[..., self.num_bodies:, :]
         else:
             super()._get_rigid_body_states_from_tensor(states_tensor)
+        return
+
+    def _push_robots(self):
+        """ Randomly pushes the robots. Emulates an impulse by setting a randomized base velocity.
+        """
+        if self.headless:
+            super()._push_robots()
+        else:
+            forces = torch.zeros((self.num_envs, self._all_actor_rb_states.shape[1], 3), device=self.device, dtype=torch.float)
+            torques = torch.zeros((self.num_envs, self._all_actor_rb_states.shape[1], 3), device=self.device, dtype=torch.float)
+
+            actor_forces = forces[:, :self.rb_states.shape[1], :]
+            actor_torques = torques[:, :self.rb_states.shape[1], :]
+
+            mask = self.perturbation_time <= 0
+            apply_mask = torch.rand(self.num_envs, device=self.device) < self.dt  # apply to only a percentage of envs
+            self.perturbation_time[self.perturbation_enabled_episodes & mask & apply_mask] = self.perturbation_time[
+                self.perturbation_enabled_episodes & mask & apply_mask].uniform_(0.1, 3)
+            self.perturbation_forces[self.perturbation_enabled_episodes & mask & apply_mask] = self.perturbation_forces[
+                self.perturbation_enabled_episodes & mask & apply_mask].uniform_(-20, 20)
+            self.perturbation_torques[self.perturbation_enabled_episodes & mask & apply_mask] = self.perturbation_torques[
+                self.perturbation_enabled_episodes & mask & apply_mask].uniform_(-5, 5)
+
+            actor_forces[~mask] = self.perturbation_forces[~mask].expand(-1, self.rb_states.shape[1], -1)
+            actor_torques[~mask] = self.perturbation_torques[~mask].expand(-1, self.rb_states.shape[1], -1)
+            self.perturbation_time[~mask] -= self.dt
+
+            self.gym.apply_rigid_body_force_tensors(self.sim, gymtorch.unwrap_tensor(forces),
+                                                    gymtorch.unwrap_tensor(torques), gymapi.GLOBAL_SPACE)
         return
 
     def _get_root_states_from_tensor(self, state_tensor):
@@ -187,13 +217,13 @@ class A1Navigation(A1AMP):
         return
 
     def _reset_goal_pos(self, goal_reset_envs):
-        self.goal_terminate[goal_reset_envs] = torch.randint(100, 300, (len(goal_reset_envs),), device=self.device,
+        self.goal_terminate[goal_reset_envs] = torch.randint(100, 200, (len(goal_reset_envs),), device=self.device,
                                                              dtype=torch.int32)
         self.goal_step[goal_reset_envs] = 0
         goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 5.0
         goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
-        self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot))
-        self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot))
+        self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot)) + self._root_states[goal_reset_envs, 0]
+        self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot)) + self._root_states[goal_reset_envs, 1]
         if not self.headless:
             # goal_pos = torch.zeros((self.num_envs, 3), device=self.device)
             # goal_pos[goal_reset_envs, :2] = self._goal_pos[goal_reset_envs]
@@ -204,12 +234,8 @@ class A1Navigation(A1AMP):
                                                          gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
 
     def reset_idx(self, env_ids):
-        self._reset_goal_pos(env_ids)
         super().reset_idx(env_ids)
-        # self._reset_actors(env_ids)
-        # self._reset_goal_pos(env_ids)
-        # self._refresh_sim_tensors()
-        # self._compute_observations(env_ids)
+        self._reset_goal_pos(env_ids)
         return
 
 
@@ -330,7 +356,7 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, dt, device):
     d1 = x_diff / d_len
     d2 = y_diff / d_len
     vel_reward = torch.exp(- torch.maximum(torch.zeros_like(v1, dtype=torch.float, device=device), 1.0 - (d1 * v1 + d2 * v2)) ** 2)
-    vel_reward = torch.where(dist > 0.25, vel_reward, torch.ones_like(vel_reward))
+    vel_reward = torch.where(dist > 0.04, vel_reward, torch.ones_like(vel_reward, dtype=torch.float, device=device))
     reward = 0.7 * dist_reward + 0.3 * vel_reward
     return reward
 

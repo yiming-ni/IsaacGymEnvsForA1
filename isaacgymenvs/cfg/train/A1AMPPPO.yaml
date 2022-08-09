@@ -21,7 +21,7 @@ params:
           b: 0.01
         sigma_init:
           name: const_initializer
-          val: -3.2
+          val: -3
         fixed_sigma: True
         learn_sigma: False
 
