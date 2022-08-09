@@ -201,7 +201,7 @@ class A1Base(VecTask):
             self.action_blocker = CommunicationBlocker(self.num_envs, 1. / dt, self.cfg["task"]["noise"]["delay_bound"],
                                                        self._dof_pos, prob=0.1, device=self.device)  # freq = sim freq
             ob_curr = torch.cat([self._root_states[:, 3:7], self._dof_pos], dim=-1)
-            self.obs_state_blocker = CommunicationBlocker(self.num_envs, 1. / self.dt, self.cfg["task"]["noise"]["delay_bound"],
+            self.obs_state_blocker = CommunicationBlocker(self.num_envs, 1. / dt, self.cfg["task"]["noise"]["delay_bound"],
                                                           ob_curr, prob=0.1, device=self.device)  # freq = policy freq
 
         self._init_obs_tensors()
@@ -518,7 +518,7 @@ class A1Base(VecTask):
             # pos[:2] += torch_rand_float(-1., 1., (2, 1), device=self.device).squeeze(1)
             # start_pose.p = gymapi.Vec3(*pos)
 
-            contact_filter = 1
+            contact_filter = 0
             handle = self.gym.create_actor(env_ptr, a1_asset, start_pose, "a1", i, contact_filter, 0)
 
             # create markers
@@ -650,8 +650,9 @@ class A1Base(VecTask):
         else:
             if (env_ids is None):
                 if self.add_delay:
+                    # print('real ', ob_curr)
                     ob_curr = self.obs_state_blocker.send_msg(ob_curr)
-                    # print(ob_curr)
+                    # print('delay ', ob_curr)
                 # self.obs_buf[:] = self.obs
                 self._states_history[:] = self._states_history.roll(-1, 1)
                 self._actions_history[:] = self._actions_history.roll(-1, 1)
