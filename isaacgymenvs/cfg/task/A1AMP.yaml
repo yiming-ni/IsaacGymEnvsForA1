@@ -39,6 +39,7 @@ env:
 
   asset:
     assetFileName: "urdf/a1_ig.urdf"
+    ballAsset: "urdf/soccerball.urdf"
 #    assetFileName: "mjcf/a1_test.xml"
 
   plane:

@@ -42,7 +42,7 @@ from ..base.vec_task import VecTask
 
 DOF_BODY_IDS = [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15]
 DOF_OFFSETS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-NUM_CURR_OBS = 16
+NUM_CURR_OBS = 18
 NUM_ACTIONS = 12
 NUM_OBS = (NUM_CURR_OBS + NUM_ACTIONS) * 15 + NUM_CURR_OBS  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
 # base_height, base_orientation=4, base_angular_vel=3, joint_pos=12, joint_velocity=12
@@ -425,31 +425,7 @@ class A1Base(VecTask):
         asset_options.thickness = self.cfg["asset"]["thickness"]
         asset_options.disable_gravity = self.cfg["asset"]["disable_gravity"]
 
-        _goal_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 4.0 + 1.0
-        _goal_rot = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * torch.pi * 2
-        self._goal_pos = torch.zeros((self.num_envs, 2), dtype=torch.float, device=self.device)
-        self._goal_pos[..., 0] = torch.flatten(_goal_dist * torch.cos(_goal_rot))
-        self._goal_pos[..., 1] = torch.flatten(_goal_dist * torch.sin(_goal_rot))
-        # create marker options if add_markers is true
-        if self.add_markers:
-            marker_asset_options = gymapi.AssetOptions()
-            marker_asset_options.angular_damping = 0.0
-            marker_asset_options.max_angular_velocity = 4 * np.pi
-            marker_asset_options.slices_per_cylinder = 16
-
-            marker_asset_options.fix_base_link = True
-            marker_asset = self.gym.create_sphere(self.sim, 0.03, marker_asset_options)
-            init_marker_pos = gymapi.Transform()
-            init_marker_pos.p.z = 0.3
-            self.num_markers = 4
-        elif not self.headless:
-            goal_asset_opts = gymapi.AssetOptions()
-            goal_asset_opts.fix_base_link = True
-            goal_asset = self.gym.create_sphere(self.sim, 0.03, goal_asset_opts)
-            init_goal_pos = gymapi.Transform()
-            self.num_markers = 1  # TODO for goal pos
-        else:
-            self.num_markers = 0
+        marker_asset, marker_pos = self._create_marker_envs(asset_options)
 
         a1_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
 
@@ -594,7 +570,7 @@ class A1Base(VecTask):
         """overridden by subclasses"""
         return
 
-    def _create_marker_envs(self):
+    def _create_marker_envs(self, asset_opts):
         self.num_markers = 0
         return self.num_markers, self.num_markers
 
@@ -721,14 +697,16 @@ class A1Base(VecTask):
             dof_pos = self._dof_pos
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
+                root_rot_obs = quat_to_tan_norm(root_quat)
 
         else:
             root_quat = self._root_states[env_ids, 3:7]
             dof_pos = self._dof_pos[env_ids]
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
+                root_rot_obs = quat_to_tan_norm(root_quat)
 
-        ob_curr = torch.cat([root_quat, dof_pos], dim=-1)
+        ob_curr = torch.cat([root_rot_obs, dof_pos], dim=-1)
         return ob_curr
 
     def _reset_actors(self, env_ids):
