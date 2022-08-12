@@ -108,22 +108,28 @@ class A1Navigation(A1AMP):
             super()._create_marker_actors(env_ptr, marker_asset, init_goal_pos, i)
         return
 
-    def _create_marker_envs(self):
+    def _create_marker_envs(self, asset_opts):
         _goal_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 5.0
         _goal_rot = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * torch.pi * 2
-        self._goal_pos = torch.zeros((self.num_envs, 2), dtype=torch.float, device=self.device)
+        self._goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
         self._goal_pos[..., 0] = torch.flatten(_goal_dist * torch.cos(_goal_rot))
         self._goal_pos[..., 1] = torch.flatten(_goal_dist * torch.sin(_goal_rot))
         if not self.headless:
             goal_asset_opts = gymapi.AssetOptions()
             goal_asset_opts.fix_base_link = True
             goal_asset = self.gym.create_sphere(self.sim, 0.03, goal_asset_opts)
+
+            # if "asset" in self.cfg["env"]:
+            #     asset_file = self.cfg["env"]["asset"]["ballAsset"]
+            # asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
+            # goal_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_opts)
+
             init_goal_pos = gymapi.Transform()
             self.num_markers = 1
             return goal_asset, init_goal_pos
         else:
 
-            super()._create_marker_envs()
+            super()._create_marker_envs(asset_opts)
             return 0, 0
 
 
@@ -156,21 +162,21 @@ class A1Navigation(A1AMP):
 
     def _compute_a1_obs_full_states(self, env_ids=None):
         if (env_ids is None):
-            goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
-            goal_pos[..., 2] = 0.2
+            # goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
+            # goal_pos[..., 2] = 0.2
             root_states = self._root_states
             dof_pos = self._dof_pos
             dof_vel = self._dof_vel
             key_body_pos = self._rigid_body_pos[:, self._key_body_ids, :]
-            goal_pos[..., :2] = self._goal_pos
+            goal_pos = self._goal_pos
         else:
-            goal_pos = torch.zeros((len(env_ids), 3), dtype=torch.float, device=self.device)
-            goal_pos[..., 2] = 0.2
+            # goal_pos = torch.zeros((len(env_ids), 3), dtype=torch.float, device=self.device)
+            # goal_pos[..., 2] = 0.2
             root_states = self._root_states[env_ids]
             dof_pos = self._dof_pos[env_ids]
             dof_vel = self._dof_vel[env_ids]
             key_body_pos = self._rigid_body_pos[env_ids][:, self._key_body_ids, :]
-            goal_pos[..., :2] = self._goal_pos[env_ids]
+            goal_pos = self._goal_pos[env_ids]
 
         obs = compute_a1_observations(root_states, dof_pos, dof_vel,
                                       key_body_pos, self._local_root_obs, goal_pos)
@@ -183,26 +189,27 @@ class A1Navigation(A1AMP):
             dof_pos = self._dof_pos
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
-            goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
-            goal_pos[..., 2] = 0.2
-            goal_pos[..., :2] = self._goal_pos
+                root_rot_obs = quat_to_tan_norm(root_quat)
+            # goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
+            # goal_pos[..., 2] = 0.2
+            goal_pos = self._goal_pos
             goal_xy = compute_goal_observations(root_states, goal_pos)
             self._goal_xy = goal_xy
 
         else:
             root_states = self._root_states[env_ids]
             root_quat = root_states[:, 3:7]
-            root_quat = self._root_states[env_ids, 3:7]
             dof_pos = self._dof_pos[env_ids]
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
-            goal_pos = torch.zeros((len(env_ids), 3), dtype=torch.float, device=self.device)
-            goal_pos[..., 2] = 0.2
-            goal_pos[..., :2] = self._goal_pos[env_ids]
+                root_rot_obs = quat_to_tan_norm(root_quat)
+            # goal_pos = torch.zeros((len(env_ids), 3), dtype=torch.float, device=self.device)
+            # goal_pos[..., 2] = 0.2
+            goal_pos = self._goal_pos[env_ids]
             goal_xy = compute_goal_observations(root_states, goal_pos)
             self._goal_xy[env_ids] = goal_xy
 
-        ob_curr = torch.cat([root_quat, dof_pos], dim=-1)
+        ob_curr = torch.cat([root_rot_obs, dof_pos], dim=-1)
         return ob_curr
 
     def post_physics_step(self):
@@ -229,7 +236,7 @@ class A1Navigation(A1AMP):
             # goal_pos[goal_reset_envs, :2] = self._goal_pos[goal_reset_envs]
             # goal_pos[goal_reset_envs, 2] = 0.2
             actor_indices = self.all_actor_indices[goal_reset_envs, 1].flatten()
-            self._goal_root_states[goal_reset_envs, :2] = self._goal_pos[goal_reset_envs]
+            self._goal_root_states[goal_reset_envs, :3] = self._goal_pos[goal_reset_envs]
             self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
                                                          gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
 
@@ -237,6 +244,17 @@ class A1Navigation(A1AMP):
         super().reset_idx(env_ids)
         self._reset_goal_pos(env_ids)
         return
+
+    def _build_contact_body_ids_tensor(self, env_ptr, actor_handle):
+        body_ids = []
+        for body_name in self._contact_bodies:
+            body_id = self.gym.find_actor_rigid_body_handle(env_ptr, actor_handle, body_name)
+            assert (body_id != -1)
+            body_ids.append(body_id)
+        body_ids.append(self.num_bodies)  # the last rigid body
+
+        body_ids = to_torch(body_ids, device=self.device, dtype=torch.long)
+        return body_ids
 
 
 
@@ -358,6 +376,7 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, dt, device):
     vel_reward = torch.exp(- torch.maximum(torch.zeros_like(v1, dtype=torch.float, device=device), 1.0 - (d1 * v1 + d2 * v2)) ** 2)
     vel_reward = torch.where(dist > 0.04, vel_reward, torch.ones_like(vel_reward, dtype=torch.float, device=device))
     reward = 0.7 * dist_reward + 0.3 * vel_reward
+    # print("reward: ", reward)
     return reward
 
 
