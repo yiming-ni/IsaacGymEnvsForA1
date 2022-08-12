@@ -2,6 +2,7 @@ import torch
 
 from isaacgym import gymapi
 from isaacgym import gymtorch
+import os
 
 from .amp.a1_base import A1Base, dof_to_obs
 from .a1_amp import A1AMP
@@ -12,8 +13,8 @@ from .amp.utils_amp.motion_lib import A1MotionLib
 from isaacgym.torch_utils import *
 from isaacgymenvs.utils.torch_jit_utils import *
 
-ADDITIONAL_OBS_NUM = 3 + 4 + 3 + 3 + 2  # local pos, quat, linear vel, angular vel of the ball, goal pos
-BALL_RAD = 1
+ADDITIONAL_OBS_NUM = 3 + 6 + 3 + 3 + 2  # local pos, 6d rot, linear vel, angular vel of the ball, goal pos
+BALL_RAD = 0.1
 
 
 class A1Dribbling(A1AMP):
@@ -44,8 +45,8 @@ class A1Dribbling(A1AMP):
                             ..., 0, :]
         self._ball_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers + 1,
                                                                   self.num_dof + 1)[..., 1, :]
-        self._ball_root_states[:, :3] = self.initial_ball_pos
-        self._ball_root_states[:, 3:] = 0
+        self._ball_root_states[:, :7] = self.initial_ball_pos
+        self._ball_root_states[:, 7:] = 0
         self._prev_ball_states = self._ball_root_states.clone()
         if not self.headless:
             self._goal_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers + 1, self.num_dof + 1)[..., 2, :]
@@ -69,19 +70,30 @@ class A1Dribbling(A1AMP):
                                           gymapi.Vec3(1, 0, 0))
         return
 
-    def _create_marker_envs(self):
+    def _create_marker_envs(self, asset_opts):
         asset, pos = [], []
         # set initial ball pos
         _ball_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 3.0
         _ball_angle = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * torch.pi * 2
-        self.initial_ball_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
+        self.initial_ball_pos = torch.zeros((self.num_envs, 7), dtype=torch.float, device=self.device)
         self.initial_ball_pos[..., 0] = torch.flatten(_ball_dist * torch.cos(_ball_angle))
         self.initial_ball_pos[..., 1] = torch.flatten(_ball_dist * torch.sin(_ball_angle))
         self.initial_ball_pos[..., 2] = BALL_RAD
+        # randomly sample quaternion
+        u = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
+        v = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
+        w = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
+        self.initial_ball_pos[..., 3] = torch.sqrt_(1. - u) * torch.sin(v * torch.pi * 2)
+        self.initial_ball_pos[..., 4] = torch.sqrt_(1. - u) * torch.cos(v * torch.pi * 2)
+        self.initial_ball_pos[..., 5] = torch.sqrt_(u) * torch.sin(w * torch.pi * 2)
+        self.initial_ball_pos[..., 6] = torch.sqrt_(u) * torch.cos(w * torch.pi * 2)
 
-        ball_asset_opts = gymapi.AssetOptions()
-        ball_asset_opts.fix_base_link = True
-        ball_asset = self.gym.create_sphere(self.sim, BALL_RAD, ball_asset_opts)
+        # ball_asset_opts = gymapi.AssetOptions()
+        # ball_asset_opts.fix_base_link = True
+        if "asset" in self.cfg["env"]:
+            asset_file = self.cfg["env"]["asset"]["ballAsset"]
+        asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
+        ball_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_opts)
         init_ball_pos = gymapi.Transform()
         self.num_markers = 1
         asset.append(ball_asset)
@@ -111,11 +123,10 @@ class A1Dribbling(A1AMP):
         self._dof_vel[env_ids] = dof_vel
 
         actor_indices = self.all_actor_indices[env_ids, 0].flatten()
-        ball_indices = self.all_actor_indices[env_ids, 1].flatten()
+
         self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
                                                      gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
-        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
-                                                     gymtorch.unwrap_tensor(ball_indices), len(ball_indices))
+
         self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
                                               gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
 
@@ -175,12 +186,22 @@ class A1Dribbling(A1AMP):
         ball_dist = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 5.0
         ball_rot = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self.initial_ball_pos[env_ids, 0] = torch.flatten(ball_dist * torch.cos(ball_rot)) + self._root_states[
-            env_ids, 0]*0
+            env_ids, 0]
         self.initial_ball_pos[env_ids, 1] = torch.flatten(ball_dist * torch.sin(ball_rot)) + self._root_states[
-            env_ids, 1]*0
+            env_ids, 1]
         self.initial_ball_pos[env_ids, 2] = BALL_RAD
-        self._ball_root_states[env_ids, :3] = self.initial_ball_pos[env_ids, :]
-        self._ball_root_states[env_ids, 3:] = 0.
+        u = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
+        v = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
+        w = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
+        self.initial_ball_pos[env_ids, 3] = torch.sqrt_(1. - u) * torch.sin(v * torch.pi * 2)
+        self.initial_ball_pos[env_ids, 4] = torch.sqrt_(1. - u) * torch.cos(v * torch.pi * 2)
+        self.initial_ball_pos[env_ids, 5] = torch.sqrt_(u) * torch.sin(w * torch.pi * 2)
+        self.initial_ball_pos[env_ids, 6] = torch.sqrt_(u) * torch.cos(w * torch.pi * 2)
+        self._ball_root_states[env_ids, :7] = self.initial_ball_pos[env_ids, :]
+        self._ball_root_states[env_ids, 7:] = 0.
+        ball_indices = self.all_actor_indices[env_ids, 1].flatten()
+        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
+                                                     gymtorch.unwrap_tensor(ball_indices), len(ball_indices))
         return
 
     def _reset_goal_pos(self, goal_reset_envs):
@@ -192,11 +213,22 @@ class A1Dribbling(A1AMP):
         self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 0]
         self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 1]
         if not self.headless:
-            actor_indices = self.all_actor_indices[goal_reset_envs, 1].flatten()
+            actor_indices = self.all_actor_indices[goal_reset_envs, 2].flatten()
             self._goal_root_states[goal_reset_envs, :2] = self._goal_pos[goal_reset_envs]
             self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
                                                          gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
         return
+
+    def _build_contact_body_ids_tensor(self, env_ptr, actor_handle):
+        body_ids = []
+        for body_name in self._contact_bodies:
+            body_id = self.gym.find_actor_rigid_body_handle(env_ptr, actor_handle, body_name)
+            assert (body_id != -1)
+            body_ids.append(body_id)
+        body_ids.append(self.num_bodies)  # the last rigid body
+
+        body_ids = to_torch(body_ids, device=self.device, dtype=torch.long)
+        return body_ids
 
 
 #####################################################################
@@ -280,6 +312,7 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
     local_ball_pos = my_quat_rotate(heading_rot, local_ball_pos)
 
     local_ball_rot = quat_mul(heading_rot, ball_rot)
+    ball_rot_obs = quat_to_tan_norm(local_ball_rot)
 
     local_ball_vel = my_quat_rotate(heading_rot, ball_vel)
 
@@ -288,17 +321,17 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
     dof_obs = dof_to_obs(dof_pos)
 
     obs = torch.cat((root_h, root_rot_obs, local_root_vel, local_root_ang_vel, dof_obs, dof_vel, flat_local_key_pos,
-                     flat_local_goal_xy, local_ball_pos, local_ball_rot, local_ball_vel, local_ball_ang_vel),
+                     flat_local_goal_xy, local_ball_pos[:, :2], ball_pos[:, 2], ball_rot_obs, local_ball_vel, local_ball_ang_vel),
                     dim=-1)
     return obs
 
 
-@torch.jit.script
+# @torch.jit.script
 def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt, device):
     # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, Optional[Device]) -> Tensor
 
-    v1 = (root_xy[:, 0] - prev_root_xy[:, 0]) / dt
-    v2 = (root_xy[:, 1] - prev_root_xy[:, 1]) / dt
+    v1_char = (root_xy[:, 0] - prev_root_xy[:, 0]) / dt
+    v2_char = (root_xy[:, 1] - prev_root_xy[:, 1]) / dt
     v1_ball = (ball_xy[:, 0] - prev_ball_xy[:, 0]) / dt
     v2_ball = (ball_xy[:, 1] - prev_ball_xy[:, 1]) / dt
 
@@ -308,23 +341,25 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
 
     d_ball = diff_b / torch.sqrt_(dist_b).reshape(-1, 1)
     actor_vel_reward = torch.exp(
-        - 1.5 * torch.maximum(torch.zeros_like(v1, dtype=torch.float, device=device),
-                        1.0 - (d_ball[:, 0] * v1 + d_ball[:, 1] * v2)) ** 2)
+        - 1.5 * torch.maximum(torch.zeros_like(v1_char, dtype=torch.float, device=device),
+                        1.0 - (d_ball[:, 0] * v1_char + d_ball[:, 1] * v2_char)) ** 2)
 
-    x_diff = goal_xy[:, 0] - root_xy[:, 0]
-    y_diff = goal_xy[:, 1] - root_xy[:, 1]
-    dist = x_diff * x_diff + y_diff * y_diff
-    dist_reward = torch.exp(- dist * 0.5)
+    # x_diff = goal_xy[:, 0] - ball_xy[:, 0]
+    # y_diff = goal_xy[:, 1] - ball_xy[:, 1]
+    # dist = x_diff * x_diff + y_diff * y_diff
+    # dist_reward = torch.exp(- dist * 0.5)
 
 
-    d_len = torch.sqrt_(dist)
-    d1 = x_diff / d_len
-    d2 = y_diff / d_len
-    ball_vel_reward = torch.exp(
-        - torch.maximum(torch.zeros_like(v1, dtype=torch.float, device=device),
-                        1.0 - (d1 * v1_ball + d2 * v2_ball)) ** 2)
-    ball_vel_reward = torch.where(dist > 0.25, ball_vel_reward, torch.ones_like(ball_vel_reward, dtype=torch.float, device=device))
-    reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
+    # d_len = torch.sqrt_(dist)
+    # d1 = x_diff / d_len
+    # d2 = y_diff / d_len
+    # ball_vel_reward = torch.exp(
+    #     - torch.maximum(torch.zeros_like(v1_ball, dtype=torch.float, device=device),
+    #                     1.0 - (d1 * v1_ball + d2 * v2_ball)) ** 2)
+    # ball_vel_reward = torch.where(dist > 0.25, ball_vel_reward, torch.ones_like(ball_vel_reward, dtype=torch.float, device=device))
+    # reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
+    reward = 0.7 * dist_b_reward + 0.3 * actor_vel_reward
+    # print("total: ", reward)
     return reward
 
 

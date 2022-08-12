@@ -1,0 +1,27 @@
+<?xml version="1.0" ?>
+<robot name="urdf_robot">
+  <link name="baseLink">
+
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+       <mass value="0.37"/>
+       <inertia ixx="1" ixy="0" ixz="0" iyy="1" iyz="0" izz="1"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+      <sphere radius="0.1"/>
+				<!-- <mesh filename="Jabulani.obj" scale="1 1 1"/>       -->
+      </geometry>
+      <material name="yellow">
+        <color rgba="0.957 0.898 0.340 1."/>
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+	 <sphere radius="0.1"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>
