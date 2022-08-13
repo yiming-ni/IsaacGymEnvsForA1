@@ -251,7 +251,8 @@ class A1Navigation(A1AMP):
             body_id = self.gym.find_actor_rigid_body_handle(env_ptr, actor_handle, body_name)
             assert (body_id != -1)
             body_ids.append(body_id)
-        body_ids.append(self.num_bodies)  # the last rigid body
+        if not self.headless:
+            body_ids.append(self.num_bodies)  # the last rigid body
 
         body_ids = to_torch(body_ids, device=self.device, dtype=torch.long)
         return body_ids

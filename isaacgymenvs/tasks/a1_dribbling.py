@@ -190,9 +190,9 @@ class A1Dribbling(A1AMP):
         self.initial_ball_pos[env_ids, 1] = torch.flatten(ball_dist * torch.sin(ball_rot)) + self._root_states[
             env_ids, 1]
         self.initial_ball_pos[env_ids, 2] = BALL_RAD
-        u = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
-        v = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
-        w = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
+        u = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device)
+        v = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device)
+        w = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device)
         self.initial_ball_pos[env_ids, 3] = torch.flatten(torch.sqrt_(1. - u) * torch.sin(v * torch.pi * 2))
         self.initial_ball_pos[env_ids, 4] = torch.flatten(torch.sqrt_(1. - u) * torch.cos(v * torch.pi * 2))
         self.initial_ball_pos[env_ids, 5] = torch.flatten(torch.sqrt_(u) * torch.sin(w * torch.pi * 2))
@@ -321,7 +321,7 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
     dof_obs = dof_to_obs(dof_pos)
 
     obs = torch.cat((root_h, root_rot_obs, local_root_vel, local_root_ang_vel, dof_obs, dof_vel, flat_local_key_pos,
-                     flat_local_goal_xy, local_ball_pos[:, :2], ball_pos[:, 2], ball_rot_obs, local_ball_vel, local_ball_ang_vel),
+                     flat_local_goal_xy, local_ball_pos[:, :2], ball_pos[:, 2:3], ball_rot_obs, local_ball_vel, local_ball_ang_vel),
                     dim=-1)
     return obs
 
