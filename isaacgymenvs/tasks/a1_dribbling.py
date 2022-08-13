@@ -83,10 +83,10 @@ class A1Dribbling(A1AMP):
         u = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
         v = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
         w = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
-        self.initial_ball_pos[..., 3] = torch.sqrt_(1. - u) * torch.sin(v * torch.pi * 2)
-        self.initial_ball_pos[..., 4] = torch.sqrt_(1. - u) * torch.cos(v * torch.pi * 2)
-        self.initial_ball_pos[..., 5] = torch.sqrt_(u) * torch.sin(w * torch.pi * 2)
-        self.initial_ball_pos[..., 6] = torch.sqrt_(u) * torch.cos(w * torch.pi * 2)
+        self.initial_ball_pos[..., 3] = torch.flatten(torch.sqrt_(1. - u) * torch.sin(v * torch.pi * 2))
+        self.initial_ball_pos[..., 4] = torch.flatten(torch.sqrt_(1. - u) * torch.cos(v * torch.pi * 2))
+        self.initial_ball_pos[..., 5] = torch.flatten(torch.sqrt_(u) * torch.sin(w * torch.pi * 2))
+        self.initial_ball_pos[..., 6] = torch.flatten(torch.sqrt_(u) * torch.cos(w * torch.pi * 2))
 
         # ball_asset_opts = gymapi.AssetOptions()
         # ball_asset_opts.fix_base_link = True
@@ -193,10 +193,10 @@ class A1Dribbling(A1AMP):
         u = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
         v = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
         w = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
-        self.initial_ball_pos[env_ids, 3] = torch.sqrt_(1. - u) * torch.sin(v * torch.pi * 2)
-        self.initial_ball_pos[env_ids, 4] = torch.sqrt_(1. - u) * torch.cos(v * torch.pi * 2)
-        self.initial_ball_pos[env_ids, 5] = torch.sqrt_(u) * torch.sin(w * torch.pi * 2)
-        self.initial_ball_pos[env_ids, 6] = torch.sqrt_(u) * torch.cos(w * torch.pi * 2)
+        self.initial_ball_pos[env_ids, 3] = torch.flatten(torch.sqrt_(1. - u) * torch.sin(v * torch.pi * 2))
+        self.initial_ball_pos[env_ids, 4] = torch.flatten(torch.sqrt_(1. - u) * torch.cos(v * torch.pi * 2))
+        self.initial_ball_pos[env_ids, 5] = torch.flatten(torch.sqrt_(u) * torch.sin(w * torch.pi * 2))
+        self.initial_ball_pos[env_ids, 6] = torch.flatten(torch.sqrt_(u) * torch.cos(w * torch.pi * 2))
         self._ball_root_states[env_ids, :7] = self.initial_ball_pos[env_ids, :]
         self._ball_root_states[env_ids, 7:] = 0.
         ball_indices = self.all_actor_indices[env_ids, 1].flatten()
