@@ -18,7 +18,7 @@ from isaacgymenvs.utils.torch_jit_utils import *
 
 
 NUM_OBS = 1 + 6 + 3 + 3 + 12 + 12 + 4*3 + 2
-NUM_CURR_OBS = 16
+NUM_CURR_OBS = 18
 
 class A1Navigation(A1AMP):
     def __init__(self, cfg, sim_device, graphics_device_id, headless):
