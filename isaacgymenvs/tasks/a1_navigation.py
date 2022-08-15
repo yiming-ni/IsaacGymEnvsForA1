@@ -114,6 +114,7 @@ class A1Navigation(A1AMP):
         self._goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
         self._goal_pos[..., 0] = torch.flatten(_goal_dist * torch.cos(_goal_rot))
         self._goal_pos[..., 1] = torch.flatten(_goal_dist * torch.sin(_goal_rot))
+        # self._goal_pos[..., 2] = 0.1
         if not self.headless:
             goal_asset_opts = gymapi.AssetOptions()
             goal_asset_opts.fix_base_link = True
@@ -189,12 +190,12 @@ class A1Navigation(A1AMP):
             dof_pos = self._dof_pos
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
-                root_rot_obs = quat_to_tan_norm(root_quat)
+            root_rot_obs = quat_to_tan_norm(root_quat)
             # goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
             # goal_pos[..., 2] = 0.2
             goal_pos = self._goal_pos
             goal_xy = compute_goal_observations(root_states, goal_pos)
-            self._goal_xy = goal_xy
+            self._goal_xy[:] = goal_xy
 
         else:
             root_states = self._root_states[env_ids]
@@ -202,7 +203,7 @@ class A1Navigation(A1AMP):
             dof_pos = self._dof_pos[env_ids]
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
-                root_rot_obs = quat_to_tan_norm(root_quat)
+            root_rot_obs = quat_to_tan_norm(root_quat)
             # goal_pos = torch.zeros((len(env_ids), 3), dtype=torch.float, device=self.device)
             # goal_pos[..., 2] = 0.2
             goal_pos = self._goal_pos[env_ids]
@@ -229,8 +230,8 @@ class A1Navigation(A1AMP):
         self.goal_step[goal_reset_envs] = 0
         goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 5.0
         goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
-        self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot)) + self._root_states[goal_reset_envs, 0]
-        self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot)) + self._root_states[goal_reset_envs, 1]
+        self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot))
+        self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot))
         if not self.headless:
             # goal_pos = torch.zeros((self.num_envs, 3), device=self.device)
             # goal_pos[goal_reset_envs, :2] = self._goal_pos[goal_reset_envs]
@@ -241,8 +242,8 @@ class A1Navigation(A1AMP):
                                                          gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
 
     def reset_idx(self, env_ids):
-        super().reset_idx(env_ids)
         self._reset_goal_pos(env_ids)
+        super().reset_idx(env_ids)
         return
 
     def _build_contact_body_ids_tensor(self, env_ptr, actor_handle):
@@ -357,7 +358,9 @@ def compute_goal_observations(root_states, goal_pos):
 def compute_local_root_quat(root_rot):
     # type: (Tensor) -> Tensor
     heading_rot = calc_heading_quat_inv(root_rot)
-    return quat_mul(heading_rot, root_rot)
+    root_rot_obs = quat_mul(heading_rot, root_rot)
+    root_rot_obs = quat_to_tan_norm(root_rot_obs)
+    return root_rot_obs
 
 
 @torch.jit.script
@@ -378,35 +381,7 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, dt, device):
     vel_reward = torch.where(dist > 0.04, vel_reward, torch.ones_like(vel_reward, dtype=torch.float, device=device))
     reward = 0.7 * dist_reward + 0.3 * vel_reward
     # print("reward: ", reward)
+    # print("dist_reward: {}, \nvel_reward: {}".format(dist_reward, vel_reward))
     return reward
-
-
-@torch.jit.script
-def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
-                     max_episode_length, enable_early_termination, termination_height):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float) -> Tuple[Tensor, Tensor]
-    terminated = torch.zeros_like(reset_buf)
-
-    if (enable_early_termination):
-        masked_contact_buf = contact_buf.clone()
-        masked_contact_buf[:, contact_body_ids, :] = 0
-        fall_contact = torch.any(masked_contact_buf > 0.1, dim=-1)
-        fall_contact = torch.any(fall_contact, dim=-1)
-
-        body_height = rigid_body_pos[..., 2]
-        fall_height = body_height < termination_height
-        fall_height[:, contact_body_ids] = False
-        fall_height = torch.any(fall_height, dim=-1)
-
-        has_fallen = torch.logical_and(fall_contact, fall_height)
-
-        # first timestep can sometimes still have nonzero contact forces
-        # so only check after first couple of steps
-        has_fallen *= (progress_buf > 1)
-        terminated = torch.where(has_fallen, torch.ones_like(reset_buf), terminated)
-
-    reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), terminated)
-
-    return reset, terminated
 
 
