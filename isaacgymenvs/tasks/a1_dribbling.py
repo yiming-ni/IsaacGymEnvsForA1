@@ -21,8 +21,9 @@ class A1Dribbling(A1AMP):
     def __init__(self, cfg, sim_device, graphics_device_id, headless):
         super().__init__(cfg, sim_device, graphics_device_id, headless)
         # track goal progress
-        self.goal_terminate = torch.randint(100, 200, (self.num_envs,), device=self.device, dtype=torch.int32)
+        self.goal_terminate = torch.randint(self.max_episode_length / 2, self.max_episode_length, (self.num_envs,), device=self.device, dtype=torch.int32)
         self.goal_step = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
+        self._success_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
 
     def get_obs_size(self):
         obs_size = super().get_obs_size()
@@ -173,9 +174,12 @@ class A1Dribbling(A1AMP):
 
     def post_physics_step(self):
         self.goal_step += 1
+        self._refresh_sim_tensors()
         self._prev_root_states[:] = self._root_states[:]
         self._prev_ball_states[:] = self._ball_root_states[:]
         super().post_physics_step()
+        self.extras["success"] = self._success_buf
+
         # reset goal pos
         goal_reset_envs = (self.goal_step >= self.goal_terminate).nonzero(as_tuple=False).flatten()
         if len(goal_reset_envs) > 0:
@@ -205,7 +209,7 @@ class A1Dribbling(A1AMP):
         return
 
     def _reset_goal_pos(self, goal_reset_envs):
-        self.goal_terminate[goal_reset_envs] = torch.randint(100, 200, (len(goal_reset_envs),), device=self.device,
+        self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length/2, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
                                                              dtype=torch.int32)
         self.goal_step[goal_reset_envs] = 0
         goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 5.0
@@ -229,6 +233,15 @@ class A1Dribbling(A1AMP):
 
         body_ids = to_torch(body_ids, device=self.device, dtype=torch.long)
         return body_ids
+
+    def _compute_reset(self):
+        self.reset_buf[:], self._terminate_buf[:], self._success_buf[:] = compute_a1_reset(self.reset_buf, self.progress_buf,
+                                                                     self._contact_forces, self._contact_body_ids,
+                                                                     self._rigid_body_pos, self.max_episode_length,
+                                                                     self._enable_early_termination,
+                                                                     self._termination_height, self._success_buf,
+                                                                     self._goal_pos[:, :2], self._ball_root_states[:, :2])
+        return
 
 
 #####################################################################
@@ -326,7 +339,7 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
     return obs
 
 
-# @torch.jit.script
+@torch.jit.script
 def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt, device):
     # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, Optional[Device]) -> Tensor
 
@@ -365,9 +378,14 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
 
 @torch.jit.script
 def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
-                     max_episode_length, enable_early_termination, termination_height):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float) -> Tuple[Tensor, Tensor]
+                     max_episode_length, enable_early_termination, termination_height, success_buf, goal, ball):
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
     terminated = torch.zeros_like(reset_buf)
+
+
+    bg_dist = (goal[:, 0] - ball[:, 0]) ** 2 + (goal[:, 1] - ball[:, 1]) ** 2
+    success = torch.zeros_like(reset_buf)
+    success = torch.where(bg_dist < 0.25, torch.ones_like(reset_buf), success)
 
     if (enable_early_termination):
         masked_contact_buf = contact_buf.clone()
@@ -386,10 +404,11 @@ def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rig
         # so only check after first couple of steps
         has_fallen *= (progress_buf > 1)
         terminated = torch.where(has_fallen, torch.ones_like(reset_buf), terminated)
+        terminated = torch.where(success_buf == 1., success_buf, terminated)
 
     reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), terminated)
 
-    return reset, terminated
+    return reset, terminated, success
 
 
 

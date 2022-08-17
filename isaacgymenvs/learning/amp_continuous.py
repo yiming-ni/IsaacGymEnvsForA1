@@ -110,7 +110,7 @@ class AMPAgent(common_agent.CommonAgent):
             self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'])
             shaped_rewards = self.rewards_shaper(rewards)
             self.experience_buffer.update_data('rewards', n, shaped_rewards)
-            self.experience_buffer.update_data('next_obses', n, self.obs['obs'])
+            self.experience_buffer.update_data('next_obses', n, self.obs['obs'])  # critic obs
             self.experience_buffer.update_data('dones', n, self.dones)
             self.experience_buffer.update_data('amp_obs', n, infos['amp_obs'])
 
@@ -118,6 +118,10 @@ class AMPAgent(common_agent.CommonAgent):
             terminated = terminated.unsqueeze(-1)
             next_vals = self._eval_critic(self.obs)
             next_vals *= (1.0 - terminated)
+            if 'success' in infos.keys():
+                success = infos['success'].float()
+                success = success.unsqueeze(-1)
+                next_vals = torch.where(success == 1.0, torch.ones_like(next_vals) / (1 - self.gamma), next_vals) # max_reward/(1-discount)
             self.experience_buffer.update_data('next_values', n, next_vals)
 
             self.current_rewards += rewards
