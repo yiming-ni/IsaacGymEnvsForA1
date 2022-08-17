@@ -200,9 +200,12 @@ class A1Base(VecTask):
         if self.add_delay:
             self.action_blocker = CommunicationBlocker(self.num_envs, 1. / dt, self.cfg["task"]["noise"]["delay_bound"],
                                                        self._dof_pos, prob=0.1, device=self.device)  # freq = sim freq
-            ob_curr = torch.cat([self._root_states[:, 3:7], self._dof_pos], dim=-1)
-            self.obs_state_blocker = CommunicationBlocker(self.num_envs, 1. / dt, self.cfg["task"]["noise"]["delay_bound"],
-                                                          ob_curr, prob=0.1, device=self.device)  # freq = policy freq
+            # ob_curr = torch.cat([self._root_states[:, 3:7], self._dof_pos], dim=-1)
+            # self.obs_state_blocker = CommunicationBlocker(self.num_envs, 1. / dt, self.cfg["task"]["noise"]["delay_bound"],
+            #                                               ob_curr, prob=0.1, device=self.device)  # freq = policy freq
+            states = torch.cat([self._root_states, self._dof_state], dim=-1)
+            self.state_blocker = CommunicationBlocker(self.num_envs, 1. / dt, self.cfg["task"]["noise"]["delay_bound"],
+                                                      states, prob=0.1, device=self.device)
 
         self._init_obs_tensors()
 
@@ -610,6 +613,7 @@ class A1Base(VecTask):
         lim_low = torch.tensor(lim_low, dtype=torch.float, device=self.device)
         self._pd_action_scale = torch.maximum(torch.abs(lim_high - self._pd_action_offset), torch.abs(lim_low - self._pd_action_offset))
         self._pd_action_scale = torch.clamp_max(self._pd_action_scale, torch.pi)
+        # [1.1239, 3.1416, 1.2526] hip thigh calf
 
         return
 
@@ -649,10 +653,8 @@ class A1Base(VecTask):
                 self.obs_buf[env_ids] = ob_curr
         else:
             if (env_ids is None):
-                if self.add_delay:
-                    # print('real ', ob_curr)
-                    ob_curr = self.obs_state_blocker.send_msg(ob_curr)
-                    # print('delay ', ob_curr)
+                # if self.add_delay:
+                #     ob_curr = self.obs_state_blocker.send_msg(ob_curr)
                 # self.obs_buf[:] = self.obs
                 self._states_history[:] = self._states_history.roll(-1, 1)
                 self._actions_history[:] = self._actions_history.roll(-1, 1)
@@ -779,15 +781,21 @@ class A1Base(VecTask):
         pd_tar = self._action_to_pd_targets(self.actions)
         if self.include_af:
             pd_tar = self.action_filter.filter(pd_tar)
-        if self.add_delay:
-            pd_tar = self.action_blocker.send_msg(pd_tar)
         for _ in range(self.control_freq_inv):
+            if self.add_delay:
+                pd_tar = self.action_blocker.send_msg(pd_tar)
             self.torques = self._compute_torques(pd_tar).view(self.torques.shape)
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
             self.gym.simulate(self.sim)
             if self.device == 'cpu':
                 self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
+            if self.add_delay:
+                states = torch.cat([self._root_states, self._dof_state], dim=-1)
+                states = self.state_blocker.send_msg(states)
+                self._root_states[:] = states[:, :13]
+                self._dof_state[:] = states[:, 13:]
+                # TODO this way amp will get delayed obs
 
         # fill time out buffer
         self.timeout_buf = torch.where(self.progress_buf >= self.max_episode_length - 1,
