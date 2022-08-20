@@ -14,6 +14,7 @@ from isaacgym.torch_utils import *
 from isaacgymenvs.utils.torch_jit_utils import *
 
 ADDITIONAL_OBS_NUM = 3 + 6 + 3 + 3 + 2  # local pos, 6d rot, linear vel, angular vel of the ball, goal pos
+NUM_CURR_OBS = 18 + 3
 BALL_RAD = 0.1
 
 
@@ -21,20 +22,68 @@ class A1Dribbling(A1AMP):
     def __init__(self, cfg, sim_device, graphics_device_id, headless):
         super().__init__(cfg, sim_device, graphics_device_id, headless)
         # track goal progress
-        self.goal_terminate = torch.randint(self.max_episode_length / 2, self.max_episode_length, (self.num_envs,), device=self.device, dtype=torch.int32)
+        self.goal_terminate = torch.randint(self.max_episode_length // 2, self.max_episode_length, (self.num_envs,), device=self.device, dtype=torch.int32)
         self.goal_step = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
         self._success_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
 
     def get_obs_size(self):
         obs_size = super().get_obs_size()
-        return obs_size + ADDITIONAL_OBS_NUM
+        if self.history_steps is None:
+            return obs_size + ADDITIONAL_OBS_NUM
+        else:
+            return obs_size + 2 + 3 * (self.history_steps+1)
 
     def _init_obs_tensors(self):
-        # TODO add ball history obs
-        pass
+        if self.history_steps is not None:
+            states_idx = NUM_CURR_OBS * (self.history_steps + 1)
+            self._states_history = self.obs_buf[:, :states_idx].view(self.num_envs, self.history_steps + 1,
+                                                                     -1)  # last entry is current obs
+            self._goal_xy = self.obs_buf[:, states_idx:states_idx + 2]
+            self._actions_history = self.obs_buf[:, states_idx + 2:].view(self.num_envs, self.history_steps, -1)
+        return
 
     def _get_rigid_body_states_from_tensor(self, states_tensor):
-        pass
+        if not self.headless:
+            self._all_actor_rb_states = gymtorch.wrap_tensor(states_tensor)
+            self._all_actor_rb_states = self._all_actor_rb_states.view(self.num_envs,
+                                                                       self.num_bodies + self.num_markers, -1)
+            self.rb_states = self._all_actor_rb_states[..., :self.num_bodies, :]
+            self.ball_states = self._all_actor_rb_states[..., self.num_bodies:-1, :]
+            self.marker_states = self._all_actor_rb_states[..., -1:, :]
+        else:
+            self._all_actor_rb_states = gymtorch.wrap_tensor(states_tensor)
+            self._all_actor_rb_states = self._all_actor_rb_states.view(self.num_envs,
+                                                                       self.num_bodies + self.num_markers, -1)
+            self.rb_states = self._all_actor_rb_states[..., :self.num_bodies, :]
+            self.ball_states = self._all_actor_rb_states[..., self.num_bodies:, :]
+        return
+
+    def _push_robots(self):
+        """ Randomly pushes the robots. Emulates an impulse by setting a randomized base velocity.
+        """
+
+        forces = torch.zeros((self.num_envs, self._all_actor_rb_states.shape[1], 3), device=self.device, dtype=torch.float)
+        torques = torch.zeros((self.num_envs, self._all_actor_rb_states.shape[1], 3), device=self.device, dtype=torch.float)
+
+        actor_forces = forces[:, :self.rb_states.shape[1], :]
+        actor_torques = torques[:, :self.rb_states.shape[1], :]
+
+        mask = self.perturbation_time <= 0
+        apply_mask = torch.rand(self.num_envs, device=self.device) < self.dt  # apply to only a percentage of envs
+        self.perturbation_time[self.perturbation_enabled_episodes & mask & apply_mask] = self.perturbation_time[
+            self.perturbation_enabled_episodes & mask & apply_mask].uniform_(0.1, 3)
+        self.perturbation_forces[self.perturbation_enabled_episodes & mask & apply_mask] = self.perturbation_forces[
+            self.perturbation_enabled_episodes & mask & apply_mask].uniform_(-20, 20)
+        self.perturbation_torques[self.perturbation_enabled_episodes & mask & apply_mask] = self.perturbation_torques[
+            self.perturbation_enabled_episodes & mask & apply_mask].uniform_(-5, 5)
+
+        actor_forces[~mask] = self.perturbation_forces[~mask].expand(-1, self.rb_states.shape[1], -1)
+        actor_torques[~mask] = self.perturbation_torques[~mask].expand(-1, self.rb_states.shape[1], -1)
+        self.perturbation_time[~mask] -= self.dt
+
+        self.gym.apply_rigid_body_force_tensors(self.sim, gymtorch.unwrap_tensor(forces),
+                                                gymtorch.unwrap_tensor(torques), gymapi.GLOBAL_SPACE)
+        return
 
     def _get_root_states_from_tensor(self, state_tensor):
         self.all_actor_indices = torch.arange(self.num_envs * (self.num_markers + 1), dtype=torch.int32,
@@ -102,7 +151,7 @@ class A1Dribbling(A1AMP):
         # create goal pos near the ball
         _goal_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 5.0
         _goal_rot = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * torch.pi * 2
-        self._goal_pos = torch.zeros((self.num_envs, 2), dtype=torch.float, device=self.device)
+        self._goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
         self._goal_pos[..., 0] = torch.flatten(_goal_dist * torch.cos(_goal_rot)) + self.initial_ball_pos[..., 0]
         self._goal_pos[..., 1] = torch.flatten(_goal_dist * torch.sin(_goal_rot)) + self.initial_ball_pos[..., 1]
         if not self.headless:
@@ -144,27 +193,55 @@ class A1Dribbling(A1AMP):
 
     def _compute_a1_obs_full_states(self, env_ids=None):
         if (env_ids is None):
-            goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
-            goal_pos[..., 2] = 0.2
             root_states = self._root_states
             dof_pos = self._dof_pos
             dof_vel = self._dof_vel
             key_body_pos = self._rigid_body_pos[:, self._key_body_ids, :]
-            goal_pos[..., :2] = self._goal_pos
+            goal_pos = self._goal_pos
             ball_states = self._ball_root_states
         else:
-            goal_pos = torch.zeros((len(env_ids), 3), dtype=torch.float, device=self.device)
-            goal_pos[..., 2] = 0.2
             root_states = self._root_states[env_ids]
             dof_pos = self._dof_pos[env_ids]
             dof_vel = self._dof_vel[env_ids]
             key_body_pos = self._rigid_body_pos[env_ids][:, self._key_body_ids, :]
-            goal_pos[..., :2] = self._goal_pos[env_ids]
+            goal_pos = self._goal_pos[env_ids]
             ball_states = self._ball_root_states[env_ids]
 
         obs = compute_a1_observations(root_states, dof_pos, dof_vel,
                                       key_body_pos, self._local_root_obs, goal_pos, ball_states)
         return obs
+
+    def _compute_a1_obs_reduced_states(self, env_ids=None):
+        if (env_ids is None):
+            root_states = self._root_states
+            root_quat = root_states[:, 3:7]
+            dof_pos = self._dof_pos
+            if self._local_root_obs:
+                root_quat = compute_local_root_quat(root_quat)
+            root_rot_obs = quat_to_tan_norm(root_quat)
+            # goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
+            # goal_pos[..., 2] = 0.2
+            goal_pos = self._goal_pos
+            ball_pos = self._ball_root_states[:, :3]
+            goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
+            self._goal_xy[:] = goal_xy
+
+        else:
+            root_states = self._root_states[env_ids]
+            root_quat = root_states[:, 3:7]
+            dof_pos = self._dof_pos[env_ids]
+            if self._local_root_obs:
+                root_quat = compute_local_root_quat(root_quat)
+            root_rot_obs = quat_to_tan_norm(root_quat)
+            # goal_pos = torch.zeros((len(env_ids), 3), dtype=torch.float, device=self.device)
+            # goal_pos[..., 2] = 0.2
+            goal_pos = self._goal_pos[env_ids]
+            ball_pos = self._ball_root_states[env_ids, :3]
+            goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
+            self._goal_xy[env_ids] = goal_xy
+
+        ob_curr = torch.cat([root_rot_obs, dof_pos, local_ball_pos], dim=-1)
+        return ob_curr
 
     def reset_idx(self, env_ids):
         self._reset_ball_pos(env_ids)
@@ -209,7 +286,7 @@ class A1Dribbling(A1AMP):
         return
 
     def _reset_goal_pos(self, goal_reset_envs):
-        self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length/2, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
+        self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//2, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
                                                              dtype=torch.int32)
         self.goal_step[goal_reset_envs] = 0
         goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 5.0
@@ -218,7 +295,7 @@ class A1Dribbling(A1AMP):
         self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 1]
         if not self.headless:
             actor_indices = self.all_actor_indices[goal_reset_envs, 2].flatten()
-            self._goal_root_states[goal_reset_envs, :2] = self._goal_pos[goal_reset_envs]
+            self._goal_root_states[goal_reset_envs, :3] = self._goal_pos[goal_reset_envs]
             self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
                                                          gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
         return
@@ -410,6 +487,30 @@ def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rig
 
     return reset, terminated, success
 
+@torch.jit.script
+def compute_goal_observations(root_states, goal_pos, ball_pos):
+    # type: (Tensor, Tensor, Tensor) -> Tuple[Tensor, Tensor]
+    root_pos = root_states[:, 0:3]
+    root_rot = root_states[:, 3:7]
 
+    heading_rot = calc_heading_quat_inv(root_rot)
+
+    local_goal_pos = goal_pos - root_pos
+    local_target_pos = my_quat_rotate(heading_rot, local_goal_pos)
+    flat_local_goal_xy = local_target_pos[:, :2]
+
+    local_ball_pos = ball_pos - root_pos
+    local_ball_pos = my_quat_rotate(heading_rot, local_ball_pos)
+    local_ball_pos[:, 2] = ball_pos[:, 2]
+
+    return flat_local_goal_xy, local_ball_pos
+
+@torch.jit.script
+def compute_local_root_quat(root_rot):
+    # type: (Tensor) -> Tensor
+    heading_rot = calc_heading_quat_inv(root_rot)
+    root_rot_obs = quat_mul(heading_rot, root_rot)
+    root_rot_obs = quat_to_tan_norm(root_rot_obs)
+    return root_rot_obs
 
 
