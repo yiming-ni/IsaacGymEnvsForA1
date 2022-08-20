@@ -267,8 +267,8 @@ class A1Dribbling(A1AMP):
     def _reset_ball_pos(self, env_ids):
         ball_dist = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 5.0
         ball_rot = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * torch.pi * 2
-        self.initial_ball_pos[env_ids, 0] = torch.flatten(ball_dist * torch.cos(ball_rot))
-        self.initial_ball_pos[env_ids, 1] = torch.flatten(ball_dist * torch.sin(ball_rot))
+        self.initial_ball_pos[env_ids, 0] = torch.flatten(ball_dist * torch.cos(ball_rot)) + self._root_states[env_ids, 0]
+        self.initial_ball_pos[env_ids, 1] = torch.flatten(ball_dist * torch.sin(ball_rot)) + self._root_states[env_ids, 1]
         self.initial_ball_pos[env_ids, 2] = BALL_RAD
         u = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device)
         v = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device)
@@ -289,7 +289,7 @@ class A1Dribbling(A1AMP):
         self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//2, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
                                                              dtype=torch.int32)
         self.goal_step[goal_reset_envs] = 0
-        goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 5.0
+        goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 10.0
         goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 0]
         self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 1]
