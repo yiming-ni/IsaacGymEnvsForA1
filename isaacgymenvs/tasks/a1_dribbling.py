@@ -22,7 +22,7 @@ class A1Dribbling(A1AMP):
     def __init__(self, cfg, sim_device, graphics_device_id, headless):
         super().__init__(cfg, sim_device, graphics_device_id, headless)
         # track goal progress
-        self.goal_terminate = torch.randint(self.max_episode_length / 2, self.max_episode_length, (self.num_envs,), device=self.device, dtype=torch.int32)
+        self.goal_terminate = torch.randint(self.max_episode_length // 2, self.max_episode_length, (self.num_envs,), device=self.device, dtype=torch.int32)
         self.goal_step = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
         self._success_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
 
@@ -286,7 +286,7 @@ class A1Dribbling(A1AMP):
         return
 
     def _reset_goal_pos(self, goal_reset_envs):
-        self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length/2, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
+        self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//2, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
                                                              dtype=torch.int32)
         self.goal_step[goal_reset_envs] = 0
         goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 5.0
