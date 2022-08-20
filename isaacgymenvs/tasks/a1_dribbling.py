@@ -316,7 +316,7 @@ class A1Dribbling(A1AMP):
                                                                      self._contact_forces, self._contact_body_ids,
                                                                      self._rigid_body_pos, self.max_episode_length,
                                                                      self._enable_early_termination,
-                                                                     self._termination_height, self._success_buf,
+                                                                     self._termination_height,
                                                                      self._goal_pos[:, :2], self._ball_root_states[:, :2])
         return
 
@@ -455,8 +455,8 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
 
 @torch.jit.script
 def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
-                     max_episode_length, enable_early_termination, termination_height, success_buf, goal, ball):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
+                     max_episode_length, enable_early_termination, termination_height, goal, ball):
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
     terminated = torch.zeros_like(reset_buf)
 
 
@@ -481,7 +481,7 @@ def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rig
         # so only check after first couple of steps
         has_fallen *= (progress_buf > 1)
         terminated = torch.where(has_fallen, torch.ones_like(reset_buf), terminated)
-        terminated = torch.where(success_buf == 1., success_buf, terminated)
+        terminated = torch.where(success == 1., success, terminated)
 
     reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), terminated)
 
