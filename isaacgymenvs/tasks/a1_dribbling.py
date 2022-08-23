@@ -16,6 +16,7 @@ from isaacgymenvs.utils.torch_jit_utils import *
 ADDITIONAL_OBS_NUM = 3 + 6 + 3 + 3 + 2  # local pos, 6d rot, linear vel, angular vel of the ball, goal pos
 NUM_CURR_OBS = 18 + 3
 BALL_RAD = 0.1
+init_goal_dist = 5.0
 
 
 class A1Dribbling(A1AMP):
@@ -40,6 +41,12 @@ class A1Dribbling(A1AMP):
                                                                      -1)  # last entry is current obs
             self._goal_xy = self.obs_buf[:, states_idx:states_idx + 2]
             self._actions_history = self.obs_buf[:, states_idx + 2:].view(self.num_envs, self.history_steps, -1)
+            if self.priv_obs:
+                self.priv_obs_buf = torch.zeros_like(self.obs_buf)
+                self._priv_states_history = self.priv_obs_buf[:, :states_idx].view(self.num_envs, self.history_steps + 1,
+                                                                     -1)
+                self._priv_goal_xy = self.priv_obs_buf[:, states_idx:states_idx + 2]
+                self._priv_actions_history = self.priv_obs_buf[:, states_idx + 2:].view(self.num_envs, self.history_steps, -1)
         return
 
     def _get_rigid_body_states_from_tensor(self, states_tensor):
@@ -149,7 +156,7 @@ class A1Dribbling(A1AMP):
         asset.append(ball_asset)
         pos.append(init_ball_pos)
         # create goal pos near the ball
-        _goal_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 5.0
+        _goal_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * init_goal_dist
         _goal_rot = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self._goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
         self._goal_pos[..., 0] = torch.flatten(_goal_dist * torch.cos(_goal_rot)) + self.initial_ball_pos[..., 0]
@@ -225,6 +232,8 @@ class A1Dribbling(A1AMP):
             ball_pos = self._ball_root_states[:, :3]
             goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
             self._goal_xy[:] = goal_xy
+            if self.priv_obs:
+                self._priv_goal_xy[:] = goal_xy
 
         else:
             root_states = self._root_states[env_ids]
@@ -239,6 +248,8 @@ class A1Dribbling(A1AMP):
             ball_pos = self._ball_root_states[env_ids, :3]
             goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
             self._goal_xy[env_ids] = goal_xy
+            if self.priv_obs:
+                self._priv_goal_xy[env_ids] = goal_xy
 
         ob_curr = torch.cat([root_rot_obs, dof_pos, local_ball_pos], dim=-1)
         return ob_curr
@@ -289,7 +300,7 @@ class A1Dribbling(A1AMP):
         self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//2, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
                                                              dtype=torch.int32)
         self.goal_step[goal_reset_envs] = 0
-        goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * 10.0
+        goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * init_goal_dist
         goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 0]
         self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 1]
@@ -416,7 +427,7 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
     return obs
 
 
-@torch.jit.script
+# @torch.jit.script
 def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt, device):
     # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, Optional[Device]) -> Tensor
 
@@ -450,6 +461,7 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
     reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
     # reward = 0.7 * dist_b_reward + 0.3 * actor_vel_reward
     # print("total: ", reward)
+    print('actor ball dist: ', dist_b_reward[1])
     return reward
 
 

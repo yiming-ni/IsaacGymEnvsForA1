@@ -51,6 +51,9 @@ class AMPAgent(common_agent.CommonAgent):
     def __init__(self, base_name, config):
         super().__init__(base_name, config)
 
+        if self.normalize_input:
+            obs_shape = torch_ext.shape_whc_to_cwh(self.obs_shape)
+            self.c_obs_running_mean_std = RunningMeanStd(obs_shape).to(self.ppo_device)
         if self._normalize_amp_input:
             self._amp_input_mean_std = RunningMeanStd(self._amp_observation_space.shape).to(self.ppo_device)
 
@@ -110,13 +113,17 @@ class AMPAgent(common_agent.CommonAgent):
             self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'])
             shaped_rewards = self.rewards_shaper(rewards)
             self.experience_buffer.update_data('rewards', n, shaped_rewards)
-            self.experience_buffer.update_data('next_obses', n, self.obs['obs'])  # critic obs
+            # asymmetric actor-critic
+            if 'c_obs' in self.obs.keys():
+                self.experience_buffer.update_data('next_obses', n, self.obs['c_obs'])
+            else:
+                self.experience_buffer.update_data('next_obses', n, self.obs['obs'])  # TODO critic obs
             self.experience_buffer.update_data('dones', n, self.dones)
             self.experience_buffer.update_data('amp_obs', n, infos['amp_obs'])
 
             terminated = infos['terminate'].float()
             terminated = terminated.unsqueeze(-1)
-            next_vals = self._eval_critic(self.obs)
+            next_vals = self._eval_critic(self.obs)  #TODO add eval_critic to use priv_obs
             next_vals *= (1.0 - terminated)
             if 'success' in infos.keys():
                 success = infos['success'].float()
@@ -161,6 +168,69 @@ class AMPAgent(common_agent.CommonAgent):
             batch_dict[k] = a2c_common.swap_and_flatten01(v)
 
         return batch_dict
+
+    def _eval_critic(self, obs_dict):
+        self.model.eval()
+        if ('c_obs' in obs_dict.keys()) and (obs_dict['c_obs'] is not None):
+            obs = obs_dict['c_obs']
+            processed_obs = self._preproc_c_obs(obs)
+        else:
+            obs = obs_dict['obs']
+            processed_obs = self._preproc_obs(obs)
+        value = self.model.a2c_network.eval_critic(processed_obs)
+        if self.normalize_value:
+            value = self.value_mean_std(value, True)
+        return value
+
+    def set_eval(self):
+        self.model.eval()
+        if self.normalize_input:
+            self.running_mean_std.eval()
+            self.c_obs_running_mean_std.eval()
+        if self.normalize_value:
+            self.value_mean_std.eval()
+
+    def set_train(self):
+        self.model.train()
+        if self.normalize_input:
+            self.running_mean_std.train()
+            self.c_obs_running_mean_std.train()
+        if self.normalize_value:
+            self.value_mean_std.train()
+
+    def get_stats_weights(self):
+        state = {}
+        if self.normalize_input:
+            state['running_mean_std'] = self.running_mean_std.state_dict()
+            state['c_obs_running_mean_std'] = self.c_obs_running_mean_std.state_dict()
+        if self.normalize_value:
+            state['reward_mean_std'] = self.value_mean_std.state_dict()
+        if self.has_central_value:
+            state['assymetric_vf_mean_std'] = self.central_value_net.get_stats_weights()
+        if self.mixed_precision:
+            state['scaler'] = self.scaler.state_dict()
+        return state
+
+    def set_stats_weights(self, weights):
+        if self.normalize_input:
+            self.c_obs_running_mean_std.load_state_dict(weights['c_obs_running_mean_std'])
+        if self.normalize_value:
+            self.value_mean_std.load_state_dict(weights['reward_mean_std'])
+        if self.has_central_value:
+            self.central_value_net.set_stats_weights(weights['assymetric_vf_mean_std'])
+        if self.mixed_precision and 'scaler' in weights:
+            self.scaler.load_state_dict(weights['scaler'])
+
+    def _preproc_c_obs(self, obs_batch):
+        if type(obs_batch) is dict:
+            for k,v in obs_batch.items():
+                obs_batch[k] = self._preproc_c_obs(v)
+        else:
+            if obs_batch.dtype == torch.uint8:
+                obs_batch = obs_batch.float() / 255.0
+        if self.normalize_input:
+            obs_batch = self.c_obs_running_mean_std(obs_batch)
+        return obs_batch
 
     def prepare_dataset(self, batch_dict):
         super().prepare_dataset(batch_dict)
@@ -265,6 +335,8 @@ class AMPAgent(common_agent.CommonAgent):
         actions_batch = input_dict['actions']
         obs_batch = input_dict['obs']
         obs_batch = self._preproc_obs(obs_batch)
+        c_obs = input_dict['c_obs'] if 'c_obs' in input_dict.keys() else None
+        c_obs = self._preproc_c_obs(c_obs)
 
         amp_obs = input_dict['amp_obs'][0:self._amp_minibatch_size]
         amp_obs = self._preproc_amp_obs(amp_obs)
@@ -284,6 +356,7 @@ class AMPAgent(common_agent.CommonAgent):
             'is_train': True,
             'prev_actions': actions_batch, 
             'obs' : obs_batch,
+            'c_obs': c_obs,
             'amp_obs' : amp_obs,
             'amp_obs_replay' : amp_obs_replay,
             'amp_obs_demo' : amp_obs_demo
