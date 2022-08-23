@@ -36,6 +36,7 @@ env:
 
   asset:
     assetFileName: "urdf/a1_ig.urdf"
+    ballAsset: "urdf/soccerball.urdf"
 
   plane:
     staticFriction: 1.0

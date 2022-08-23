@@ -85,6 +85,8 @@ class A1Base(VecTask):
 
         self.cfg["env"]["numObservations"] = self.get_obs_size()
         self.cfg["env"]["numActions"] = self.get_action_size()
+        self.priv_obs = self.cfg['env'].get('priv_obs', False)
+
 
 # <<<<<<< HEAD
 # =======
@@ -203,9 +205,10 @@ class A1Base(VecTask):
             # ob_curr = torch.cat([self._root_states[:, 3:7], self._dof_pos], dim=-1)
             # self.obs_state_blocker = CommunicationBlocker(self.num_envs, 1. / dt, self.cfg["task"]["noise"]["delay_bound"],
             #                                               ob_curr, prob=0.1, device=self.device)  # freq = policy freq
-            states = torch.cat([self._root_states, self._dof_state], dim=-1)
+            self.delayed_states = torch.zeros((self.num_envs, self._root_states.shape[1]+self._dof_state.shape[1]), device=self.device)
+            self._update_delayed_states(self._root_states, self._dof_state)
             self.state_blocker = CommunicationBlocker(self.num_envs, 1. / dt, self.cfg["task"]["noise"]["delay_bound"],
-                                                      states, prob=0.1, device=self.device)
+                                                      self.delayed_states, prob=0.1, device=self.device)
 
         self._init_obs_tensors()
 
@@ -227,6 +230,13 @@ class A1Base(VecTask):
             states_idx = NUM_CURR_OBS*(self.history_steps+1)
             self._states_history = self.obs_buf[:, :states_idx].view(self.num_envs, self.history_steps+1, -1)  # last entry is current obs
             self._actions_history = self.obs_buf[:, states_idx:].view(self.num_envs, self.history_steps, -1)
+            if self.priv_obs:
+                self.priv_obs_buf = torch.zeros_like(self.obs_buf)
+                self._priv_states_history = self.priv_obs_buf[:, :states_idx].view(self.num_envs, self.history_steps + 1,
+                                                                                  -1)
+                self._priv_actions_history = self.priv_obs_buf[:, states_idx:].view(self.num_envs, self.history_steps,
+                                                                                        -1)
+
         return
 
     def _get_rigid_body_states_from_tensor(self, states_tensor):
@@ -641,9 +651,10 @@ class A1Base(VecTask):
 
     def _compute_observations(self, env_ids=None):
         ob_curr = self._compute_a1_obs(env_ids)
+        if self.priv_obs:
+            priv_ob = ob_curr.clone()
 
         if self.add_noise:
-            # obs += torch.rand_like(obs) * self.noise_scale_vec
             ob_curr += torch.rand_like(ob_curr) * self.noise_scale_vec
 
         if self.history_steps is None:
@@ -653,19 +664,25 @@ class A1Base(VecTask):
                 self.obs_buf[env_ids] = ob_curr
         else:
             if (env_ids is None):
-                # if self.add_delay:
-                #     ob_curr = self.obs_state_blocker.send_msg(ob_curr)
-                # self.obs_buf[:] = self.obs
                 self._states_history[:] = self._states_history.roll(-1, 1)
                 self._actions_history[:] = self._actions_history.roll(-1, 1)
                 self._states_history[:, -1, :] = ob_curr
                 self._actions_history[:, -1, :] = self.actions
+                if self.priv_obs:
+                    self._priv_states_history[:] = self._priv_states_history.roll(-1, 1)
+                    self._priv_states_history[:, -1, :] = priv_ob
+                    self._priv_actions_history[:] = self._actions_history[:]
             else:
                 # self.obs_buf[env_ids] = self.obs[env_ids]
                 self._states_history[env_ids] = self._states_history[env_ids].roll(-1, 1)
                 self._actions_history[env_ids] = self._actions_history[env_ids].roll(-1, 1)
                 self._states_history[env_ids, -1, :] = ob_curr
                 self._actions_history[env_ids, -1, :] = self.actions[env_ids, :]
+                if self.priv_obs:
+                    self._priv_states_history[env_ids] = self._priv_states_history[env_ids].roll(-1, 1)
+                    self._priv_states_history[env_ids, -1, :] = priv_ob
+                    self._priv_actions_history[env_ids] = self._actions_history[env_ids]
+
 
         return
 
@@ -696,15 +713,24 @@ class A1Base(VecTask):
 
     def _compute_a1_obs_reduced_states(self, env_ids=None):
         if (env_ids is None):
-            root_quat = self._root_states[:, 3:7]
-            dof_pos = self._dof_pos
+            if self.add_delay:
+                root_quat = self.delayed_states[:, 3:7]
+                dof_pos = self.delayed_states[:, 13:25]
+            else:
+                root_quat = self._root_states[:, 3:7]
+                dof_pos = self._dof_pos
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
                 root_rot_obs = quat_to_tan_norm(root_quat)
 
         else:
-            root_quat = self._root_states[env_ids, 3:7]
-            dof_pos = self._dof_pos[env_ids]
+            if self.add_delay:
+                root_quat = self.delayed_states[env_ids, 3:7]
+                dof_pos = self.delayed_states[env_ids, 13:25]
+            else:
+                root_quat = self._root_states[env_ids, 3:7]
+                dof_pos = self._dof_pos[env_ids]
+
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
                 root_rot_obs = quat_to_tan_norm(root_quat)
@@ -736,13 +762,24 @@ class A1Base(VecTask):
             self.action_filter.reset(env_ids, start_dof_pos)
         if self.add_delay:
             self.action_blocker.reset(env_ids)
-            # start_obs = self._states_history[env_ids, -1, :]
+            self._update_delayed_states(self._root_states, self._dof_state, env_ids)
             self.obs_state_blocker.reset(env_ids)
+
+    def _update_delayed_states(self, root_states, dof_states, env_ids=None):
+        if env_ids is None:
+            self.delayed_states[:, :13] = root_states
+            self.delayed_states[:, 13:] = dof_states
+        else:
+            self.delayed_states[env_ids, :13] = root_states[env_ids]
+            self.delayed_states[env_ids, 13:] = dof_states[env_ids]
+        return
 
     def _reset_obs(self, env_ids):
         self._actions_history[env_ids] = 0.
         self._states_history[env_ids] = self._states_history[env_ids, -1:, :]
-        # self.obs_buf[env_ids] = self.obs[env_ids]
+        if self.priv_obs:
+            self._priv_actions_history[env_ids] = 0.
+            self._priv_states_history[env_ids] = self._priv_states_history[env_ids, -1:, :]
 
     def _compute_torques(self, pd_tar):
         """compute torques from actions.
@@ -761,11 +798,22 @@ class A1Base(VecTask):
             d_gains = self.d_gains
         if control_type == "P":
             if self.add_noise:
-                torques = (p_gains * (pd_tar -(self._dof_pos + torch.rand_like(self._dof_pos, device=self.device) * self.noise_scale_vec[4:16]))
+                if self.add_delay:
+                    dof_pos = self.delayed_states[:, 13:25]
+                    dof_vel = self.delayed_states[:, 25:]
+                    torques = (p_gains * (pd_tar -(dof_pos + torch.rand_like(dof_pos, device=self.device) * self.noise_scale_vec[4:16]))
+                           - d_gains * (dof_vel + torch.rand_like(dof_vel, device=self.device) * self.noise_scale_dof_vel))
+                else:
+                    torques = (p_gains * (pd_tar -(self._dof_pos + torch.rand_like(self._dof_pos, device=self.device) * self.noise_scale_vec[4:16]))
                            - d_gains * (self._dof_vel + torch.rand_like(self._dof_vel, device=self.device) * self.noise_scale_dof_vel))
 
             else:
-                torques = p_gains * (pd_tar - self._dof_pos) - d_gains * self._dof_vel
+                if self.add_delay:
+                    dof_pos = self.delayed_states[:, 13:25]
+                    dof_vel = self.delayed_states[:, 25:]
+                    torques = p_gains * (pd_tar - dof_pos) - d_gains * dof_vel
+                else:
+                    torques = p_gains * (pd_tar - self._dof_pos) - d_gains * self._dof_vel
 
         else:
             raise NameError(f'Unknown controller type: {control_type}')
@@ -791,10 +839,9 @@ class A1Base(VecTask):
                 self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
             if self.add_delay:
-                states = torch.cat([self._root_states, self._dof_state], dim=-1)
-                states = self.state_blocker.send_msg(states)
-                self._root_states[:] = states[:, :13]
-                self._dof_state[:] = states[:, 13:]
+                self._update_delayed_states(self._root_states, self._dof_state)
+                self.delayed_states = self.state_blocker.send_msg(self.delayed_states)
+
                 # TODO this way amp will get delayed obs
 
         # fill time out buffer
@@ -813,6 +860,9 @@ class A1Base(VecTask):
         self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
 
         # asymmetric actor-critic
+        if self.priv_obs:
+            self.obs_dict['c_obs'] = torch.clamp(self.priv_obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+
         if self.num_states > 0:
             self.obs_dict["states"] = self.get_state()
 

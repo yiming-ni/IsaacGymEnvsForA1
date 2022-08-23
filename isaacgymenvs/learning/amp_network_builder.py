@@ -116,6 +116,102 @@ class AMPBuilder(network_builder.A2CBuilder):
 
             return
 
+        def forward(self, obs_dict):
+            if ('c_obs' not in obs_dict.keys()) or (obs_dict['c_obs'] is None):
+                return super().forward(obs_dict)
+            else:
+                obs = obs_dict['obs']
+                c_obs = obs_dict['c_obs']
+                states = obs_dict.get('rnn_states', None)
+                seq_length = obs_dict.get('seq_length', 1)
+                if self.has_cnn:
+                    # for obs shape 4
+                    # input expected shape (B, W, H, C)
+                    # convert to (B, C, W, H)
+                    if len(obs.shape) == 4:
+                        obs = obs.permute((0, 3, 1, 2))
+
+                if self.separate:
+                    a_out = obs
+                    c_out = c_obs
+                    a_out = self.actor_cnn(a_out)
+                    a_out = a_out.contiguous().view(a_out.size(0), -1)
+
+                    c_out = self.critic_cnn(c_out)
+                    c_out = c_out.contiguous().view(c_out.size(0), -1)
+
+                    if self.has_rnn:
+                        if not self.is_rnn_before_mlp:
+                            a_out_in = a_out
+                            c_out_in = c_out
+                            a_out = self.actor_mlp(a_out_in)
+                            c_out = self.critic_mlp(c_out_in)
+
+                            if self.rnn_concat_input:
+                                a_out = torch.cat([a_out, a_out_in], dim=1)
+                                c_out = torch.cat([c_out, c_out_in], dim=1)
+
+                        batch_size = a_out.size()[0]
+                        num_seqs = batch_size // seq_length
+                        a_out = a_out.reshape(num_seqs, seq_length, -1)
+                        c_out = c_out.reshape(num_seqs, seq_length, -1)
+
+                        if self.rnn_name == 'sru':
+                            a_out = a_out.transpose(0, 1)
+                            c_out = c_out.transpose(0, 1)
+
+                        if len(states) == 2:
+                            a_states = states[0]
+                            c_states = states[1]
+                        else:
+                            a_states = states[:2]
+                            c_states = states[2:]
+                        a_out, a_states = self.a_rnn(a_out, a_states)
+                        c_out, c_states = self.c_rnn(c_out, c_states)
+
+                        if self.rnn_name == 'sru':
+                            a_out = a_out.transpose(0, 1)
+                            c_out = c_out.transpose(0, 1)
+                        else:
+                            if self.rnn_ln:
+                                a_out = self.a_layer_norm(a_out)
+                                c_out = self.c_layer_norm(c_out)
+                        a_out = a_out.contiguous().reshape(a_out.size()[0] * a_out.size()[1], -1)
+                        c_out = c_out.contiguous().reshape(c_out.size()[0] * c_out.size()[1], -1)
+
+                        if type(a_states) is not tuple:
+                            a_states = (a_states,)
+                            c_states = (c_states,)
+                        states = a_states + c_states
+
+                        if self.is_rnn_before_mlp:
+                            a_out = self.actor_mlp(a_out)
+                            c_out = self.critic_mlp(c_out)
+                    else:
+                        a_out = self.actor_mlp(a_out)
+                        c_out = self.critic_mlp(c_out)
+
+                    value = self.value_act(self.value(c_out))
+
+                    if self.is_discrete:
+                        logits = self.logits(a_out)
+                        return logits, value, states
+
+                    if self.is_multi_discrete:
+                        logits = [logit(a_out) for logit in self.logits]
+                        return logits, value, states
+
+                    if self.is_continuous:
+                        mu = self.mu_act(self.mu(a_out))
+                        if self.space_config['fixed_sigma']:
+                            sigma = mu * 0.0 + self.sigma_act(self.sigma)
+                        else:
+                            sigma = self.sigma_act(self.sigma(a_out))
+
+                        return mu, sigma, value, states
+                else:
+                    return super().forward(obs_dict)
+
     def build(self, name, **kwargs):
         net = AMPBuilder.Network(self.params, **kwargs)
         return net
