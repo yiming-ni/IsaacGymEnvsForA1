@@ -205,8 +205,10 @@ class A1Base(VecTask):
             # ob_curr = torch.cat([self._root_states[:, 3:7], self._dof_pos], dim=-1)
             # self.obs_state_blocker = CommunicationBlocker(self.num_envs, 1. / dt, self.cfg["task"]["noise"]["delay_bound"],
             #                                               ob_curr, prob=0.1, device=self.device)  # freq = policy freq
-            self.delayed_states = torch.zeros((self.num_envs, self._root_states.shape[1]+self._dof_state.shape[1]), device=self.device)
-            self._update_delayed_states(self._root_states, self._dof_state)
+            self.delayed_states = torch.zeros((self.num_envs,
+                                               self._root_states.shape[1]+self._dof_pos.shape[1]+self._dof_vel.shape[1]),
+                                              device=self.device)
+            self._update_delayed_states(self._root_states, self._dof_pos, self._dof_vel)
             self.state_blocker = CommunicationBlocker(self.num_envs, 1. / dt, self.cfg["task"]["noise"]["delay_bound"],
                                                       self.delayed_states, prob=0.1, device=self.device)
 
@@ -762,16 +764,18 @@ class A1Base(VecTask):
             self.action_filter.reset(env_ids, start_dof_pos)
         if self.add_delay:
             self.action_blocker.reset(env_ids)
-            self._update_delayed_states(self._root_states, self._dof_state, env_ids)
-            self.obs_state_blocker.reset(env_ids)
+            self._update_delayed_states(self._root_states, self._dof_pos, self._dof_vel, env_ids)
+            self.state_blocker.reset(env_ids)
 
-    def _update_delayed_states(self, root_states, dof_states, env_ids=None):
+    def _update_delayed_states(self, root_states, dof_pos, dof_vel, env_ids=None):
         if env_ids is None:
             self.delayed_states[:, :13] = root_states
-            self.delayed_states[:, 13:] = dof_states
+            self.delayed_states[:, 13:25] = dof_pos
+            self.delayed_states[:, 25:] = dof_vel
         else:
             self.delayed_states[env_ids, :13] = root_states[env_ids]
-            self.delayed_states[env_ids, 13:] = dof_states[env_ids]
+            self.delayed_states[env_ids, 13:25] = dof_pos[env_ids]
+            self.delayed_states[env_ids, 25:] = dof_vel[env_ids]
         return
 
     def _reset_obs(self, env_ids):
@@ -839,7 +843,7 @@ class A1Base(VecTask):
                 self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
             if self.add_delay:
-                self._update_delayed_states(self._root_states, self._dof_state)
+                self._update_delayed_states(self._root_states, self._dof_pos, self._dof_vel)
                 self.delayed_states = self.state_blocker.send_msg(self.delayed_states)
 
                 # TODO this way amp will get delayed obs
