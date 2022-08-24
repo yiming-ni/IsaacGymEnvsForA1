@@ -66,24 +66,32 @@ class AMPAgent(common_agent.CommonAgent):
     
     def set_eval(self):
         super().set_eval()
+        if self.normalize_input:
+            self.c_obs_running_mean_std.eval()
         if self._normalize_amp_input:
             self._amp_input_mean_std.eval()
         return
 
     def set_train(self):
         super().set_train()
+        if self.normalize_input:
+            self.c_obs_running_mean_std.train()
         if self._normalize_amp_input:
             self._amp_input_mean_std.train()
         return
 
     def get_stats_weights(self):
         state = super().get_stats_weights()
+        if self.normalize_input:
+            state['c_obs_running_mean_std'] = self.c_obs_running_mean_std.state_dict()
         if self._normalize_amp_input:
             state['amp_input_mean_std'] = self._amp_input_mean_std.state_dict()
         return state
 
     def set_stats_weights(self, weights):
         super().set_stats_weights(weights)
+        if self.normalize_input:
+            self.c_obs_running_mean_std.load_state_dict(weights['c_obs_running_mean_std'])
         if self.normalize_value:
             self._amp_input_mean_std.load_state_dict(weights['amp_input_mean_std'])
         return
@@ -181,45 +189,6 @@ class AMPAgent(common_agent.CommonAgent):
         if self.normalize_value:
             value = self.value_mean_std(value, True)
         return value
-
-    def set_eval(self):
-        self.model.eval()
-        if self.normalize_input:
-            self.running_mean_std.eval()
-            self.c_obs_running_mean_std.eval()
-        if self.normalize_value:
-            self.value_mean_std.eval()
-
-    def set_train(self):
-        self.model.train()
-        if self.normalize_input:
-            self.running_mean_std.train()
-            self.c_obs_running_mean_std.train()
-        if self.normalize_value:
-            self.value_mean_std.train()
-
-    def get_stats_weights(self):
-        state = {}
-        if self.normalize_input:
-            state['running_mean_std'] = self.running_mean_std.state_dict()
-            state['c_obs_running_mean_std'] = self.c_obs_running_mean_std.state_dict()
-        if self.normalize_value:
-            state['reward_mean_std'] = self.value_mean_std.state_dict()
-        if self.has_central_value:
-            state['assymetric_vf_mean_std'] = self.central_value_net.get_stats_weights()
-        if self.mixed_precision:
-            state['scaler'] = self.scaler.state_dict()
-        return state
-
-    def set_stats_weights(self, weights):
-        if self.normalize_input:
-            self.c_obs_running_mean_std.load_state_dict(weights['c_obs_running_mean_std'])
-        if self.normalize_value:
-            self.value_mean_std.load_state_dict(weights['reward_mean_std'])
-        if self.has_central_value:
-            self.central_value_net.set_stats_weights(weights['assymetric_vf_mean_std'])
-        if self.mixed_precision and 'scaler' in weights:
-            self.scaler.load_state_dict(weights['scaler'])
 
     def _preproc_c_obs(self, obs_batch):
         if type(obs_batch) is dict:
@@ -336,7 +305,8 @@ class AMPAgent(common_agent.CommonAgent):
         obs_batch = input_dict['obs']
         obs_batch = self._preproc_obs(obs_batch)
         c_obs = input_dict['c_obs'] if 'c_obs' in input_dict.keys() else None
-        c_obs = self._preproc_c_obs(c_obs)
+        if c_obs is not None:
+            c_obs = self._preproc_c_obs(c_obs)
 
         amp_obs = input_dict['amp_obs'][0:self._amp_minibatch_size]
         amp_obs = self._preproc_amp_obs(amp_obs)

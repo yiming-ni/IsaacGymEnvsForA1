@@ -255,9 +255,20 @@ class A1Dribbling(A1AMP):
         return ob_curr
 
     def reset_idx(self, env_ids):
+        self._reset_actors(env_ids)
         self._reset_ball_pos(env_ids)
         self._reset_goal_pos(env_ids)
-        super().reset_idx(env_ids)
+        if self.domain_rand and self.dr_pd:
+            self._reset_pd_gains(env_ids)
+        self._refresh_sim_tensors()
+        self._compute_observations(env_ids)
+        if self.history_steps is not None:
+            self._reset_obs(env_ids)
+        self._reset_robot(env_ids)
+        if self.domain_rand and self.dr_push_robot:
+            self._reset_push(env_ids)
+
+        self._init_amp_obs(env_ids)
         return
 
     def post_physics_step(self):
@@ -272,7 +283,7 @@ class A1Dribbling(A1AMP):
         goal_reset_envs = (self.goal_step >= self.goal_terminate).nonzero(as_tuple=False).flatten()
         if len(goal_reset_envs) > 0:
             # print('reset encountered!')
-            self._reset_goal_pos(goal_reset_envs)
+            self._reset_goal_pos(goal_reset_envs, set_goal=True)
         return
 
     def _reset_ball_pos(self, env_ids):
@@ -296,7 +307,7 @@ class A1Dribbling(A1AMP):
         #                                              gymtorch.unwrap_tensor(ball_indices), len(ball_indices))
         return
 
-    def _reset_goal_pos(self, goal_reset_envs):
+    def _reset_goal_pos(self, goal_reset_envs, set_goal=False):
         self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//2, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
                                                              dtype=torch.int32)
         self.goal_step[goal_reset_envs] = 0
@@ -304,7 +315,7 @@ class A1Dribbling(A1AMP):
         goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 0]
         self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 1]
-        if not self.headless:
+        if (not self.headless) and set_goal:
             actor_indices = self.all_actor_indices[goal_reset_envs, 2].flatten()
             self._goal_root_states[goal_reset_envs, :3] = self._goal_pos[goal_reset_envs]
             self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
@@ -427,7 +438,7 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
     return obs
 
 
-# @torch.jit.script
+@torch.jit.script
 def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt, device):
     # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, Optional[Device]) -> Tensor
 
@@ -459,9 +470,6 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
                         1.0 - (d1 * v1_ball + d2 * v2_ball)) ** 2)
     ball_vel_reward = torch.where(dist > 0.25, ball_vel_reward, torch.ones_like(ball_vel_reward, dtype=torch.float, device=device))
     reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
-    # reward = 0.7 * dist_b_reward + 0.3 * actor_vel_reward
-    # print("total: ", reward)
-    print('actor ball dist: ', dist_b_reward[1])
     return reward
 
 
