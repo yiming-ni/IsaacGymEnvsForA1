@@ -90,7 +90,7 @@ class AMPAgent(common_agent.CommonAgent):
 
     def set_stats_weights(self, weights):
         super().set_stats_weights(weights)
-        if self.normalize_input:
+        if self.normalize_input and 'c_obs_running_mean_std' in weights.keys():
             self.c_obs_running_mean_std.load_state_dict(weights['c_obs_running_mean_std'])
         if self.normalize_value:
             self._amp_input_mean_std.load_state_dict(weights['amp_input_mean_std'])
