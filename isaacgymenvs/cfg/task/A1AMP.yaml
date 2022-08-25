@@ -171,7 +171,7 @@ task:
 
   domain_rand:
     randomize_friction: False
-    friction_range: [0.3, 3.0]
+    friction_range: [0.05, 5.0]
     randomize_joint_friction: False
     joint_friction_std: 0.01
     randomize_base_mass: True
