@@ -157,6 +157,26 @@ class A1Navigation(A1AMP):
                                                   gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
         return
 
+    def _reset_default(self, env_ids):
+        self._dof_pos[env_ids] = self._initial_dof_pos[env_ids]
+        self._dof_vel[env_ids] = self._initial_dof_vel[env_ids]
+
+        env_ids_int32 = env_ids.to(dtype=torch.int32)
+        if not self.headless:
+            self._root_states[env_ids] = self._initial_root_states[env_ids]
+            actor_indices = self.all_actor_indices[env_ids, 0].flatten()
+            self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
+                                                         gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
+            self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
+                                                  gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
+        else:
+            self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._initial_root_states),
+                                                         gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+            self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
+                                                  gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+        self._reset_default_env_ids = env_ids
+        return
+
     def _compute_reward(self, actions):
         self.rew_buf[:] = compute_a1_reward(self._root_states[:, :2], self._prev_root_states[:, :2], self._goal_pos, self.dt, self.device)
         return
