@@ -179,6 +179,9 @@ class A1Dribbling(A1AMP):
         self._dof_pos[env_ids] = dof_pos
         self._dof_vel[env_ids] = dof_vel
 
+        return
+
+    def _set_actors_tensors(self, env_ids):
         actor_indices = self.all_actor_indices[env_ids, 0].flatten()
         reset_indices = self.all_actor_indices[env_ids].flatten()
 
@@ -187,6 +190,15 @@ class A1Dribbling(A1AMP):
 
         self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
                                               gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
+        return
+
+    def _reset_default(self, env_ids):
+        self._dof_pos[env_ids] = self._initial_dof_pos[env_ids]
+        self._dof_vel[env_ids] = self._initial_dof_vel[env_ids]
+
+        self._root_states[env_ids] = self._initial_root_states[env_ids]
+        self._reset_default_env_ids = env_ids
+        return
 
     def _compute_reward(self, actions):
         self.rew_buf[:] = compute_a1_reward(self._root_states[:, :2],
@@ -258,6 +270,7 @@ class A1Dribbling(A1AMP):
         self._reset_actors(env_ids)
         self._reset_ball_pos(env_ids)
         self._reset_goal_pos(env_ids)
+        self._set_actors_tensors(env_ids)
         if self.domain_rand and self.dr_pd:
             self._reset_pd_gains(env_ids)
         self._refresh_sim_tensors()
@@ -273,7 +286,6 @@ class A1Dribbling(A1AMP):
 
     def post_physics_step(self):
         self.goal_step += 1
-        self._refresh_sim_tensors()
         self._prev_root_states[:] = self._root_states[:]
         self._prev_ball_states[:] = self._ball_root_states[:]
         super().post_physics_step()
@@ -301,7 +313,6 @@ class A1Dribbling(A1AMP):
         self.initial_ball_pos[env_ids, 6] = torch.flatten(torch.sqrt_(u) * torch.cos(w * torch.pi * 2))
         self._ball_root_states[env_ids, :7] = self.initial_ball_pos[env_ids, :]
         self._ball_root_states[env_ids, 7:] = 0.
-        # print("ball dist {}, \nball rot {}, \nball root states {}".format(ball_dist, ball_rot, self._ball_root_states))
         # ball_indices = self.all_actor_indices[env_ids, 1].flatten()
         # self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
         #                                              gymtorch.unwrap_tensor(ball_indices), len(ball_indices))
@@ -473,7 +484,7 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
     return reward
 
 
-@torch.jit.script
+# @torch.jit.script
 def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
                      max_episode_length, enable_early_termination, termination_height, goal, ball):
     # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
