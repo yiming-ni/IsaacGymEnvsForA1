@@ -191,10 +191,10 @@ class A1Base(VecTask):
         self._initial_dof_vel = torch.zeros_like(self._dof_vel, device=self.device, dtype=torch.float)
 
         self._rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)
-        self._rigid_body_pos = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[..., 0:3]   #TODO remove num_markers
-        self._rigid_body_rot = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[..., 3:7]
-        self._rigid_body_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[..., 7:10]
-        self._rigid_body_ang_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[..., 10:13]
+        self._rigid_body_pos = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[:, :self.num_bodies, 0:3]   #TODO remove num_markers
+        self._rigid_body_rot = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[:, :self.num_bodies, 3:7]
+        self._rigid_body_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[:, :self.num_bodies, 7:10]
+        self._rigid_body_ang_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[:, :self.num_bodies, 10:13]
         self._contact_forces = gymtorch.wrap_tensor(contact_force_tensor).view(self.num_envs, self.num_bodies+self.num_markers, 3)
 
         self.actions = torch.zeros((self.num_envs, self.num_actions), device=self.device)

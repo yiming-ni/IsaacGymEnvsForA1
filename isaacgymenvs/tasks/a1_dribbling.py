@@ -326,23 +326,24 @@ class A1Dribbling(A1AMP):
         goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 0]
         self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 1]
+        self._goal_root_states[goal_reset_envs, :3] = self._goal_pos[goal_reset_envs]
         if (not self.headless) and set_goal:
             actor_indices = self.all_actor_indices[goal_reset_envs, 2].flatten()
-            self._goal_root_states[goal_reset_envs, :3] = self._goal_pos[goal_reset_envs]
+
             self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
                                                          gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
         return
 
-    def _build_contact_body_ids_tensor(self, env_ptr, actor_handle):
-        body_ids = []
-        for body_name in self._contact_bodies:
-            body_id = self.gym.find_actor_rigid_body_handle(env_ptr, actor_handle, body_name)
-            assert (body_id != -1)
-            body_ids.append(body_id)
-        body_ids.append(self.num_bodies)  # the last rigid body
-
-        body_ids = to_torch(body_ids, device=self.device, dtype=torch.long)
-        return body_ids
+    # def _build_contact_body_ids_tensor(self, env_ptr, actor_handle):
+    #     body_ids = []
+    #     for body_name in self._contact_bodies:
+    #         body_id = self.gym.find_actor_rigid_body_handle(env_ptr, actor_handle, body_name)
+    #         assert (body_id != -1)
+    #         body_ids.append(body_id)
+    #     body_ids.append(self.num_bodies)  # the last rigid body
+    #
+    #     body_ids = to_torch(body_ids, device=self.device, dtype=torch.long)
+    #     return body_ids
 
     def _compute_reset(self):
         self.reset_buf[:], self._terminate_buf[:], self._success_buf[:] = compute_a1_reset(self.reset_buf, self.progress_buf,
@@ -484,7 +485,7 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
     return reward
 
 
-# @torch.jit.script
+@torch.jit.script
 def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
                      max_episode_length, enable_early_termination, termination_height, goal, ball):
     # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
