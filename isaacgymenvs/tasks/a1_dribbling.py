@@ -326,12 +326,13 @@ class A1Dribbling(A1AMP):
         goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 0]
         self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 1]
-        self._goal_root_states[goal_reset_envs, :3] = self._goal_pos[goal_reset_envs]
-        if (not self.headless) and set_goal:
-            actor_indices = self.all_actor_indices[goal_reset_envs, 2].flatten()
+        if not self.headless:
+            self._goal_root_states[goal_reset_envs, :3] = self._goal_pos[goal_reset_envs]
+            if set_goal:
+                actor_indices = self.all_actor_indices[goal_reset_envs, 2].flatten()
 
-            self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
-                                                         gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
+                self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
+                                                             gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
         return
 
     # def _build_contact_body_ids_tensor(self, env_ptr, actor_handle):
