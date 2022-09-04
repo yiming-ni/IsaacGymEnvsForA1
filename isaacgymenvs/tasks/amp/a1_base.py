@@ -268,8 +268,8 @@ class A1Base(VecTask):
 
         else:
             noise_vec = torch.zeros(NUM_CURR_OBS, dtype=torch.float, device=self.device)
-            noise_vec[:4] = noise_scales["base_quat"] * noise_level
-            noise_vec[4:16] = noise_scales["dof_pos"] * noise_level
+            noise_vec[:6] = noise_scales["base_quat"] * noise_level
+            noise_vec[6:18] = noise_scales["dof_pos"] * noise_level
         self.noise_scale_dof_vel = noise_scales["dof_vel"] * noise_level
         return noise_vec
 
@@ -540,12 +540,12 @@ class A1Base(VecTask):
             self._create_marker_actors(env_ptr, marker_asset, marker_pos, i)
 
             # TODO below for computing torque limits
-            rigid_shape_props = self._process_rigid_shape_props(rigid_shape_props_asset, i)
+            rigid_shape_props = self._process_rigid_shape_props(rigid_shape_props_asset, i)  # friction
             self.gym.set_asset_rigid_shape_properties(a1_asset, rigid_shape_props)
             dof_props = self._process_dof_props(dof_props_asset, i)
             self.gym.set_actor_dof_properties(env_ptr, handle, dof_props)
             body_props = self.gym.get_actor_rigid_body_properties(env_ptr, handle)
-            body_props = self._process_rigid_body_props(body_props, i)
+            body_props = self._process_rigid_body_props(body_props, i)  # mass, inertia, center
             self.gym.set_actor_rigid_body_properties(env_ptr, handle, body_props, recomputeInertia=True)
 
             self.gym.enable_actor_dof_force_sensors(env_ptr, handle)
