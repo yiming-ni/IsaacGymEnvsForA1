@@ -1,3 +1,4 @@
+from logging import root
 import torch
 
 from isaacgym import gymapi
@@ -26,6 +27,7 @@ class A1Dribbling(A1AMP):
         self.goal_terminate = torch.randint(self.max_episode_length // 2, self.max_episode_length, (self.num_envs,), device=self.device, dtype=torch.int32)
         self.goal_step = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
         self._success_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        self._pos_hist = torch.zeros((self.num_envs, 3, 3), device=self.device, dtype=torch.float)
 
     def get_obs_size(self):
         obs_size = super().get_obs_size()
@@ -285,10 +287,13 @@ class A1Dribbling(A1AMP):
         return
 
     def post_physics_step(self):
+        self._pos_hist[:, 0, :] = self._prev_root_states[:, :3]
+        self._pos_hist[:, 1, :] = self._root_states[:, :3]
         self.goal_step += 1
         self._prev_root_states[:] = self._root_states[:]
         self._prev_ball_states[:] = self._ball_root_states[:]
         super().post_physics_step()
+        self._pos_hist[:, 2, :] = self._root_states[:, :3]
         # states_idx = NUM_CURR_OBS * (self.history_steps + 1)
         # print('goal: ', self.obs_buf[:, states_idx:states_idx + 2])
         # print('xy: ', self._goal_xy)
@@ -355,7 +360,8 @@ class A1Dribbling(A1AMP):
                                                                      self._rigid_body_pos, self.max_episode_length,
                                                                      self._enable_early_termination,
                                                                      self._termination_height,
-                                                                     self._goal_pos[:, :2], self._ball_root_states[:, :2], init_goal_dist)
+                                                                     self._goal_pos[:, :2], self._ball_root_states[:, :2], init_goal_dist, 
+                                                                     self._pos_hist)
         return
 
 
@@ -491,16 +497,22 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
 
 @torch.jit.script
 def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
-                     max_episode_length, enable_early_termination, termination_height, goal, ball, goal_dist):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor, float) -> Tuple[Tensor, Tensor, Tensor]
+                     max_episode_length, enable_early_termination, termination_height, goal, ball, goal_dist,
+                     pos_hist):
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor, float, Tensor) -> Tuple[Tensor, Tensor, Tensor]
     terminated = torch.zeros_like(reset_buf)
 
 
     bg_dist = (goal[:, 0] - ball[:, 0]) ** 2 + (goal[:, 1] - ball[:, 1]) ** 2
     success = torch.zeros_like(reset_buf)
     success = torch.where(bg_dist < 0.25, torch.ones_like(reset_buf), success)
+    p1 = pos_hist[:, 0, :].squeeze(1)
+    p2 = pos_hist[:, 1, :].squeeze(1)
+    p3 = pos_hist[:, 2, :].squeeze(1)
+    v1 = (p2[:, 0] - p1[:, 0]) ** 2 + (p2[:, 1] - p1[:, 1]) ** 2 + (p2[:, 2] - p1[:, 2]) ** 2
+    v2 = (p3[:, 0] - p2[:, 0]) ** 2 + (p3[:, 1] - p2[:, 1]) ** 2 + (p3[:, 2] - p2[:, 2]) ** 2
     fail = torch.zeros_like(reset_buf)
-    fail = torch.where(bg_dist > goal_dist ** 2 + 2.0, torch.ones_like(reset_buf), fail)
+    fail = torch.where((bg_dist > goal_dist ** 2 + 2.0) | ((v1 < 1e-5) & (v2 < 1e-5)), torch.ones_like(reset_buf), fail)
 
     if (enable_early_termination):
         masked_contact_buf = contact_buf.clone()
