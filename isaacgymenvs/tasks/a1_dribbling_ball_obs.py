@@ -14,26 +14,27 @@ from isaacgym.torch_utils import *
 from isaacgymenvs.utils.torch_jit_utils import *
 
 ADDITIONAL_OBS_NUM = 3 + 6 + 3 + 3 + 2  # local pos, 6d rot, linear vel, angular vel of the ball, goal pos
-NUM_CURR_OBS = 18 + 3
+BALL_OBS = 3 + 3
+NUM_CURR_OBS = 18
 BALL_RAD = 0.1
 init_goal_dist = 7.0
 
 
-class A1Dribbling(A1AMP):
+# full state obs for ball: local pos, linear velocity
+class A1DribblingBallObs(A1AMP):
     def __init__(self, cfg, sim_device, graphics_device_id, headless):
         super().__init__(cfg, sim_device, graphics_device_id, headless)
         # track goal progress
         self.goal_terminate = torch.randint(self.max_episode_length // 2, self.max_episode_length, (self.num_envs,), device=self.device, dtype=torch.int32)
         self.goal_step = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
         self._success_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
-        self.add_ball_delay = self.cfg["task"]["noise"]["add_ball_delay"]
 
     def get_obs_size(self):
         obs_size = super().get_obs_size()
         if self.history_steps is None:
             return obs_size + ADDITIONAL_OBS_NUM
         else:
-            return obs_size + 2 + 3 * (self.history_steps+1)
+            return obs_size + 2 + BALL_OBS
 
     def _init_obs_tensors(self):
         if self.history_steps is not None:
@@ -41,7 +42,8 @@ class A1Dribbling(A1AMP):
             self._states_history = self.obs_buf[:, :states_idx].view(self.num_envs, self.history_steps + 1,
                                                                      -1)  # last entry is current obs
             self._goal_xy = self.obs_buf[:, states_idx:states_idx + 2]
-            self._actions_history = self.obs_buf[:, states_idx + 2:].view(self.num_envs, self.history_steps, -1)
+            self._ball_obs = self.obs_buf[:, states_idx+2:states_idx+2+BALL_OBS]
+            self._actions_history = self.obs_buf[:, states_idx+2+BALL_OBS:].view(self.num_envs, self.history_steps, -1)
             if self.priv_obs:
                 self.priv_obs_buf = torch.zeros_like(self.obs_buf)
                 self._priv_states_history = self.priv_obs_buf[:, :states_idx].view(self.num_envs, self.history_steps + 1,
@@ -233,43 +235,33 @@ class A1Dribbling(A1AMP):
 
     def _compute_a1_obs_reduced_states(self, env_ids=None):
         if (env_ids is None):
-            if self.add_delay:
-                root_states = self.delayed_states[:, :7]
-                root_quat = self.delayed_states[:, 3:7]
-                dof_pos = self.delayed_states[:, 13:25]
-            else:
-                root_states = self._root_states
-                root_quat = root_states[:, 3:7]
-                dof_pos = self._dof_pos
+            root_states = self._root_states
+            root_quat = root_states[:, 3:7]
+            dof_pos = self._dof_pos
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
             root_rot_obs = quat_to_tan_norm(root_quat)
             # goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
             # goal_pos[..., 2] = 0.2
             goal_pos = self._goal_pos
-            ball_pos = self._ball_root_states[:, :3]
-            goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
+            ball_states = self._ball_root_states[:]
+            goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_states)
             self._goal_xy[:] = goal_xy
             if self.priv_obs:
                 self._priv_goal_xy[:] = goal_xy
 
         else:
-            if self.add_delay:
-                root_states = self.delayed_states[env_ids, :7]
-                root_quat = self.delayed_states[env_ids, 3:7]
-                dof_pos = self.delayed_states[env_ids, 13:25]
-            else:
-                root_states = self._root_states[env_ids]
-                root_quat = root_states[:, 3:7]
-                dof_pos = self._dof_pos[env_ids]
+            root_states = self._root_states[env_ids]
+            root_quat = root_states[:, 3:7]
+            dof_pos = self._dof_pos[env_ids]
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
             root_rot_obs = quat_to_tan_norm(root_quat)
             # goal_pos = torch.zeros((len(env_ids), 3), dtype=torch.float, device=self.device)
             # goal_pos[..., 2] = 0.2
             goal_pos = self._goal_pos[env_ids]
-            ball_pos = self._ball_root_states[env_ids, :3]
-            goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
+            ball_states = self._ball_root_states[env_ids]
+            goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_states)
             self._goal_xy[env_ids] = goal_xy
             if self.priv_obs:
                 self._priv_goal_xy[env_ids] = goal_xy
@@ -294,24 +286,6 @@ class A1Dribbling(A1AMP):
 
         self._init_amp_obs(env_ids)
         return
-
-    def _get_noise_scale_vec(self, cfg):
-        """ Sets a vector used to scale the noise added to the observations.
-            [NOTE]: Must be adapted when changing the observations structure
-        Args:
-            cfg (Dict): Environment config file
-        Returns:
-            [torch.Tensor]: Vector of scales used to multiply a uniform distribution in [-1, 1]
-        """
-        noise_scales = self.cfg["task"]["noise"]["noise_scales"]
-        noise_level = self.cfg["task"]["noise"]["noise_level"]
-        # TODO change for actual obs
-        noise_vec = torch.zeros(NUM_CURR_OBS, dtype=torch.float, device=self.device)
-        noise_vec[:6] = noise_scales["base_quat"] * noise_level
-        noise_vec[6:18] = noise_scales["dof_pos"] * noise_level
-        noise_vec[18:21] = noise_scales["ball_pos"] * noise_level
-        self.noise_scale_dof_vel = noise_scales["dof_vel"] * noise_level
-        return noise_vec
 
     def post_physics_step(self):
         self.goal_step += 1
@@ -556,10 +530,12 @@ def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rig
     return reset, terminated, success
 
 @torch.jit.script
-def compute_goal_observations(root_states, goal_pos, ball_pos):
+def compute_goal_observations(root_states, goal_pos, ball_states):
     # type: (Tensor, Tensor, Tensor) -> Tuple[Tensor, Tensor]
     root_pos = root_states[:, 0:3]
     root_rot = root_states[:, 3:7]
+    ball_pos = ball_states[:, :3]
+    ball_lin_vel = ball_states[:, 7:10]
 
     heading_rot = calc_heading_quat_inv(root_rot)
 
@@ -571,7 +547,9 @@ def compute_goal_observations(root_states, goal_pos, ball_pos):
     local_ball_pos = my_quat_rotate(heading_rot, local_ball_pos)
     local_ball_pos[:, 2] = ball_pos[:, 2]
 
-    return flat_local_goal_xy, local_ball_pos
+    local_ball_vel = my_quat_rotate(heading_rot, ball_lin_vel)
+
+    return flat_local_goal_xy, torch.cat((local_goal_pos, local_ball_vel), dim=-1)
 
 @torch.jit.script
 def compute_local_root_quat(root_rot):
