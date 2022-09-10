@@ -205,9 +205,14 @@ class A1Navigation(A1AMP):
 
     def _compute_a1_obs_reduced_states(self, env_ids=None):
         if (env_ids is None):
-            root_states = self._root_states
-            root_quat = root_states[:, 3:7]
-            dof_pos = self._dof_pos
+            if self.add_delay:
+                root_states = self.delayed_states[:, :13]
+                root_quat = self.delayed_states[:, 3:7]
+                dof_pos = self.delayed_states[:, 13:25]
+            else:
+                root_states = self._root_states
+                root_quat = root_states[:, 3:7]
+                dof_pos = self._dof_pos
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
             root_rot_obs = quat_to_tan_norm(root_quat)
@@ -218,9 +223,14 @@ class A1Navigation(A1AMP):
             self._goal_xy[:] = goal_xy
 
         else:
-            root_states = self._root_states[env_ids]
-            root_quat = root_states[:, 3:7]
-            dof_pos = self._dof_pos[env_ids]
+            if self.add_delay:
+                root_states = self.delayed_states[env_ids, :13]
+                root_quat = self.delayed_states[env_ids, 3:7]
+                dof_pos = self.delayed_states[env_ids, 13:25]
+            else:
+                root_states = self._root_states[env_ids]
+                root_quat = root_states[:, 3:7]
+                dof_pos = self._dof_pos[env_ids]
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
             root_rot_obs = quat_to_tan_norm(root_quat)
@@ -266,17 +276,17 @@ class A1Navigation(A1AMP):
         super().reset_idx(env_ids)
         return
 
-    def _build_contact_body_ids_tensor(self, env_ptr, actor_handle):
-        body_ids = []
-        for body_name in self._contact_bodies:
-            body_id = self.gym.find_actor_rigid_body_handle(env_ptr, actor_handle, body_name)
-            assert (body_id != -1)
-            body_ids.append(body_id)
-        if not self.headless:
-            body_ids.append(self.num_bodies)  # the last rigid body
+    # def _build_contact_body_ids_tensor(self, env_ptr, actor_handle):
+    #     body_ids = []
+    #     for body_name in self._contact_bodies:
+    #         body_id = self.gym.find_actor_rigid_body_handle(env_ptr, actor_handle, body_name)
+    #         assert (body_id != -1)
+    #         body_ids.append(body_id)
+    #     if not self.headless:
+    #         body_ids.append(self.num_bodies)  # the last rigid body
 
-        body_ids = to_torch(body_ids, device=self.device, dtype=torch.long)
-        return body_ids
+    #     body_ids = to_torch(body_ids, device=self.device, dtype=torch.long)
+    #     return body_ids
 
 
 

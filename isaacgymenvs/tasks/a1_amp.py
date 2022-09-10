@@ -277,10 +277,17 @@ class A1AMP(A1Base):
         return
 
     def _update_hist_amp_obs(self, env_ids=None):
-        if (env_ids is None):
-            self._hist_amp_obs_buf[:] = self._amp_obs_buf[:, 0:(self._num_amp_obs_steps - 1)]
+        if not self.headless:
+            amp_obs_buf = self._amp_obs_buf.clone()
+            if (env_ids is None):
+                self._hist_amp_obs_buf[:] = amp_obs_buf[:, 0:(self._num_amp_obs_steps - 1)]
+            else:
+                self._hist_amp_obs_buf[env_ids] = amp_obs_buf[env_ids, 0:(self._num_amp_obs_steps - 1)]
         else:
-            self._hist_amp_obs_buf[env_ids] = self._amp_obs_buf[env_ids, 0:(self._num_amp_obs_steps - 1)]
+            if (env_ids is None):
+                self._hist_amp_obs_buf[:] = self._amp_obs_buf[:, 0:(self._num_amp_obs_steps - 1)]
+            else:
+                self._hist_amp_obs_buf[env_ids] = self._amp_obs_buf[env_ids, 0:(self._num_amp_obs_steps - 1)]
         return
     
     def _compute_amp_observations(self, env_ids=None):
