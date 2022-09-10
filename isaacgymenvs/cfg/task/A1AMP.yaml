@@ -180,6 +180,7 @@ task:
     randomize_PD: True
     push_robots: True
     push_interval_s: 0.2
+    push_ball: False
 
   noise:
     add_noise: True

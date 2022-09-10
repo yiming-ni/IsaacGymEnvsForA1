@@ -28,6 +28,8 @@ class A1Dribbling(A1AMP):
         self.goal_step = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
         self._success_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
         self.add_ball_delay = self.cfg["task"]["noise"]["add_ball_delay"]
+        self.push_ball = self.cfg['task']['domain_rand']['push_ball']
+        self.delayed_ball_obs = torch.zeros((self.num_envs, 3, 3), dtype=torch.float, device=self.device)
 
     def get_obs_size(self):
         obs_size = super().get_obs_size()
@@ -85,6 +87,12 @@ class A1Dribbling(A1AMP):
             self.perturbation_enabled_episodes & mask & apply_mask].uniform_(-20, 20)
         self.perturbation_torques[self.perturbation_enabled_episodes & mask & apply_mask] = self.perturbation_torques[
             self.perturbation_enabled_episodes & mask & apply_mask].uniform_(-5, 5)
+
+        if self.push_ball:
+            ball_forces = forces[:, self.rb_states.shape[1]:self.ball_states.shape[1], :]
+            ball_torques = torques[:, self.rb_states.shape[1]:self.ball_states.shape[1], :]
+            ball_forces[~mask] = self.perturbation_forces[~mask].expand(-1, self.ball_states.shape[1], -1)
+            ball_torques[~mask] = self.perturbation_torques[~mask].expand(-1, self.ball_states.shape[1], -1)
 
         actor_forces[~mask] = self.perturbation_forces[~mask].expand(-1, self.rb_states.shape[1], -1)
         actor_torques[~mask] = self.perturbation_torques[~mask].expand(-1, self.rb_states.shape[1], -1)
@@ -212,6 +220,11 @@ class A1Dribbling(A1AMP):
                                             self.device)
         return
 
+    def _compute_observations(self, env_ids=None):
+        super()._compute_observations(env_ids)
+        self._goal_xy += torch.rand_like(self._goal_xy) * self.noise_scale_vec[0]
+        return
+
     def _compute_a1_obs_full_states(self, env_ids=None):
         if (env_ids is None):
             root_states = self._root_states
@@ -248,7 +261,12 @@ class A1Dribbling(A1AMP):
             # goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
             # goal_pos[..., 2] = 0.2
             goal_pos = self._goal_pos
-            ball_pos = self._ball_root_states[:, :3]
+            if self.add_ball_delay:
+                ball_pos = self.delayed_ball_obs[:, 0, :]
+                self.delayed_ball_obs[:] = self.delayed_ball_obs.roll(-1, 1)
+                self.delayed_ball_obs[:, -1, :] = self._ball_root_states[:, :3]
+            else:
+                ball_pos = self._ball_root_states[:, :3]
             goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
             self._goal_xy[:] = goal_xy
             if self.priv_obs:
@@ -269,7 +287,12 @@ class A1Dribbling(A1AMP):
             # goal_pos = torch.zeros((len(env_ids), 3), dtype=torch.float, device=self.device)
             # goal_pos[..., 2] = 0.2
             goal_pos = self._goal_pos[env_ids]
-            ball_pos = self._ball_root_states[env_ids, :3]
+            if self.add_ball_delay:
+                ball_pos = self.delayed_ball_obs[env_ids, 0, :]
+                self.delayed_ball_obs[env_ids] = self.delayed_ball_obs[env_ids].roll(-1, 1)
+                self.delayed_ball_obs[env_ids, -1, :] = self._ball_root_states[env_ids, :3]
+            else:
+                ball_pos = self._ball_root_states[env_ids, :3]
             goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
             self._goal_xy[env_ids] = goal_xy
             if self.priv_obs:
@@ -349,9 +372,8 @@ class A1Dribbling(A1AMP):
         self.initial_ball_pos[env_ids, 6] = torch.flatten(torch.sqrt_(u) * torch.cos(w * torch.pi * 2))
         self._ball_root_states[env_ids, :7] = self.initial_ball_pos[env_ids, :]
         self._ball_root_states[env_ids, 7:] = 0.
-        # ball_indices = self.all_actor_indices[env_ids, 1].flatten()
-        # self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
-        #                                              gymtorch.unwrap_tensor(ball_indices), len(ball_indices))
+        if self.add_ball_delay:
+            self.delayed_ball_obs[env_ids, ...] = self.initial_ball_pos[env_ids, :3].unsqueeze(1)
         return
 
     def _reset_goal_pos(self, goal_reset_envs, set_goal=False):
@@ -388,7 +410,7 @@ class A1Dribbling(A1AMP):
                                                                      self._rigid_body_pos, self.max_episode_length,
                                                                      self._enable_early_termination,
                                                                      self._termination_height,
-                                                                     self._goal_pos[:, :2], self._ball_root_states[:, :2], init_goal_dist, 
+                                                                     self._goal_pos[:, :2], self._ball_root_states[:, :3], init_goal_dist, 
                                                                      self._pos_hist)
         return
 
@@ -525,15 +547,16 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
 
 @torch.jit.script
 def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
-                     max_episode_length, enable_early_termination, termination_height, goal, ball, goal_dist,
+                     max_episode_length, enable_early_termination, termination_height, goal, ball_pos, goal_dist,
                      pos_hist):
     # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor, float, Tensor) -> Tuple[Tensor, Tensor, Tensor]
     terminated = torch.zeros_like(reset_buf)
 
-
+    ball = ball_pos[:, :2]
+    h = ball_pos[:, 2]
     bg_dist = (goal[:, 0] - ball[:, 0]) ** 2 + (goal[:, 1] - ball[:, 1]) ** 2
     success = torch.zeros_like(reset_buf)
-    success = torch.where(bg_dist < 0.25, torch.ones_like(reset_buf), success)
+    success = torch.where((bg_dist < 0.25) & (h <= 0.7), torch.ones_like(reset_buf), success)
     p1 = pos_hist[:, 0, :].squeeze(1)
     p2 = pos_hist[:, 1, :].squeeze(1)
     p3 = pos_hist[:, 2, :].squeeze(1)
