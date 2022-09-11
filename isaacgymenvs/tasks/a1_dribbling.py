@@ -313,7 +313,7 @@ class A1Dribbling(A1AMP):
                 mask = (indices >= self.history_steps - self.ball_delay[:, None]) & (
                             indices < self.history_steps - self.ball_delay[:, None] + 1)
                 ball_pos = self.gt_ball_pos[mask, :].reshape(self.num_envs, -1)
-                print('ball_pos: ', ball_pos)
+                # print('ball_pos: ', ball_pos)
             else:
                 ball_pos = self._ball_root_states[:, :3]
             goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
@@ -582,7 +582,8 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
         - torch.maximum(torch.zeros_like(v1_ball, dtype=torch.float, device=device),
                         1.0 - (d1 * v1_ball + d2 * v2_ball)) ** 2)
     ball_vel_reward = torch.where(dist > 0.25, ball_vel_reward, torch.ones_like(ball_vel_reward, dtype=torch.float, device=device))
-    reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
+    ball_vel_penalty = torch.exp(- 0.5 * (v1_ball ** 2 + v2_ball ** 2))
+    reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.25 * ball_vel_reward + 0.5 * dist_reward + 0.05 * ball_vel_penalty
     return reward
 
 
