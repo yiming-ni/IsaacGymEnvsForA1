@@ -36,6 +36,7 @@ class A1Dribbling(A1AMP):
         # self.delayed_ball_obs = torch.zeros((self.num_envs, 4, 3), dtype=torch.float, device=self.device)
         # self.delayed_ball_obs[:] = self.initial_ball_pos[:, :3].unsqueeze(1)
         self.gt_ball_pos = torch.zeros((self.num_envs, self.history_steps, 3), dtype=torch.float, device=self.device)
+        # self.gt_ball_pos[:] = self.initial_ball_pos[:, :3].unsqueeze(1)
         self.ball_delay = torch.zeros(self.num_envs, device=self.device)
         self.ball_delay = self.ball_delay.uniform_(90, 110) / 1000 / self.dt  # unit: ms -> s -> step
         self.ball_delay = torch.round(self.ball_delay)
@@ -245,9 +246,7 @@ class A1Dribbling(A1AMP):
                 self.obs_buf[env_ids] = ob_curr
         else:
             if (env_ids is None):
-                if self.add_ball_delay:
-                    self.gt_ball_pos[:] = self.gt_ball_pos.roll(-1, 1)
-                    self.gt_ball_pos[:, -1, :] = self._ball_root_states[:, :3]
+                
                 self._states_history[:] = self._states_history.roll(-1, 1)
                 self._actions_history[:] = self._actions_history.roll(-1, 1)
                 self._states_history[:, -1, :] = ob_curr
@@ -256,10 +255,7 @@ class A1Dribbling(A1AMP):
                     self._priv_states_history[:] = self._priv_states_history.roll(-1, 1)
                     self._priv_states_history[:, -1, :] = priv_ob
                     self._priv_actions_history[:] = self._actions_history[:]
-            else:
-                if self.add_ball_delay:
-                    self.gt_ball_pos[env_ids] = self.gt_ball_pos[env_ids].roll(-1, 1)
-                    self.gt_ball_pos[env_ids, -1, :] = self._ball_root_states[env_ids, :3]
+            else:                    
                 # self.obs_buf[env_ids] = self.obs[env_ids]
                 self._states_history[env_ids] = self._states_history[env_ids].roll(-1, 1)
                 self._actions_history[env_ids] = self._actions_history[env_ids].roll(-1, 1)
@@ -309,10 +305,15 @@ class A1Dribbling(A1AMP):
             # goal_pos[..., 2] = 0.2
             goal_pos = self._goal_pos
             if self.add_ball_delay:
+                self.gt_ball_pos[:] = self.gt_ball_pos.roll(-1, 1)
+                self.gt_ball_pos[:, -1, :] = self._ball_root_states[:, :3]
                 indices = torch.arange(self.gt_ball_pos.shape[1], device=self.device).expand(self.num_envs, -1)
                 mask = (indices >= self.history_steps - self.ball_delay[:, None]) & (
                             indices < self.history_steps - self.ball_delay[:, None] + 1)
                 ball_pos = self.gt_ball_pos[mask, :].reshape(self.num_envs, -1)
+                print('observed_ball_pos: ', ball_pos[0])
+                print('gt_obs_hist: ', self.gt_ball_pos[0, -4:, :])
+                print('gt pos: ', self._ball_root_states[0, :3])
                 # print('ball_pos: ', ball_pos)
             else:
                 ball_pos = self._ball_root_states[:, :3]
@@ -337,6 +338,8 @@ class A1Dribbling(A1AMP):
             # goal_pos[..., 2] = 0.2
             goal_pos = self._goal_pos[env_ids]
             if self.add_ball_delay:
+                self.gt_ball_pos[env_ids] = self.gt_ball_pos[env_ids].roll(-1, 1)
+                self.gt_ball_pos[env_ids, -1, :] = self._ball_root_states[env_ids, :3]
                 indices = torch.arange(self.gt_ball_pos.shape[1], device=self.device).expand(
                     len(env_ids), -1)
                 mask = (indices >= self.history_steps - self.ball_delay[env_ids, None]) & (
