@@ -197,6 +197,7 @@ class A1Base(VecTask):
             self.perturbation_torques = torch.zeros((self.num_envs, 1, 3), device=self.device, dtype=torch.float)
 
         self.actions = torch.zeros((self.num_envs, self.num_actions), device=self.device)
+        self.pd_tars = torch.zeros_like(self.actions)
 
         self.add_delay = self.cfg["task"]["noise"]["add_delay"]
         if self.add_delay:
@@ -759,8 +760,9 @@ class A1Base(VecTask):
         return
 
     def _reset_robot(self, env_ids):
+        start_dof_pos = self._dof_pos[env_ids]
+        self.pd_tars[env_ids] = start_dof_pos
         if self.include_af:
-            start_dof_pos = self._dof_pos[env_ids]
             self.action_filter.reset(env_ids, start_dof_pos)
         if self.add_delay:
             self.action_blocker.reset(env_ids)
@@ -956,6 +958,10 @@ class A1Base(VecTask):
 
     def _action_to_pd_targets(self, action):
         pd_tar = self._pd_action_offset + self._pd_action_scale * action
+        high = self.pd_tars + 0.2
+        low = self.pd_tars - 0.2
+        pd_tar = torch.clip(pd_tar, low, high)
+        self.pd_tars[...] = pd_tar[...]
         return pd_tar
 
     def _init_camera(self):
