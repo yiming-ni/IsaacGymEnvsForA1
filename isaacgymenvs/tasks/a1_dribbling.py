@@ -394,16 +394,12 @@ class A1Dribbling(A1AMP):
                                                              gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
         return
 
-    # def _build_contact_body_ids_tensor(self, env_ptr, actor_handle):
-    #     body_ids = []
-    #     for body_name in self._contact_bodies:
-    #         body_id = self.gym.find_actor_rigid_body_handle(env_ptr, actor_handle, body_name)
-    #         assert (body_id != -1)
-    #         body_ids.append(body_id)
-    #     body_ids.append(self.num_bodies)  # the last rigid body
-    #
-    #     body_ids = to_torch(body_ids, device=self.device, dtype=torch.long)
-    #     return body_ids
+    def _compute_observations(self, env_ids=None):
+        super()._compute_observations(env_ids)
+        if env_ids is None:
+            self._goal_xy += torch.rand_like(self._goal_xy) * 0.05
+        else:
+            self._goal_xy[env_ids] += torch.rand_like(self._goal_xy[env_ids]) * 0.05
 
     def _compute_reset(self):
         self.reset_buf[:], self._terminate_buf[:], self._success_buf[:] = compute_a1_reset(self.reset_buf, self.progress_buf,
@@ -557,7 +553,7 @@ def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rig
     h = ball_pos[:, 2]
     bg_dist = (goal[:, 0] - ball[:, 0]) ** 2 + (goal[:, 1] - ball[:, 1]) ** 2
     success = torch.zeros_like(reset_buf)
-    success = torch.where((bg_dist < 0.25) & (h <= 0.7), torch.ones_like(reset_buf), success)
+    success = torch.where((bg_dist < 0.05) & (h <= 0.3), torch.ones_like(reset_buf), success)
     p1 = pos_hist[:, 0, :].squeeze(1)
     p2 = pos_hist[:, 1, :].squeeze(1)
     p3 = pos_hist[:, 2, :].squeeze(1)
