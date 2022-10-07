@@ -211,6 +211,35 @@ class A1Dribbling(A1AMP):
         self._reset_default_env_ids = env_ids
         return
 
+    # remove this to use all motions
+    def _reset_ref_state_init(self, env_ids):
+        num_envs = env_ids.shape[0]
+        motion_ids = self._motion_lib.sample_refs(num_envs)
+        
+        if (self._state_init == A1AMP.StateInit.Random
+            or self._state_init == A1AMP.StateInit.Hybrid):
+            motion_times = self._motion_lib.sample_time(motion_ids)
+        elif (self._state_init == A1AMP.StateInit.Start):
+            motion_times = np.zeros(num_envs)
+        else:
+            assert(False), "Unsupported state initialization strategy: {:s}".format(str(self._state_init))
+
+        root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos \
+               = self._motion_lib.get_motion_state(motion_ids, motion_times)
+
+        self._set_env_state(env_ids=env_ids, 
+                            root_pos=root_pos, 
+                            root_rot=root_rot, 
+                            dof_pos=dof_pos, 
+                            root_vel=root_vel, 
+                            root_ang_vel=root_ang_vel, 
+                            dof_vel=dof_vel)
+
+        self._reset_ref_env_ids = env_ids
+        self._reset_ref_motion_ids = motion_ids
+        self._reset_ref_motion_times = motion_times
+        return
+
     def _compute_reward(self, actions):
         self.rew_buf[:] = compute_a1_reward(self._root_states[:, :2],
                                             self._prev_root_states[:, :2],
@@ -269,6 +298,8 @@ class A1Dribbling(A1AMP):
             else:
                 ball_pos = self._ball_root_states[:, :3]
             goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
+            # local_ball_pos[...] = 0.0
+            # local_ball_pos[:, 0] = 3.0
             self._goal_xy[:] = goal_xy
             if self.priv_obs:
                 self._priv_goal_xy[:] = goal_xy
@@ -295,10 +326,17 @@ class A1Dribbling(A1AMP):
             else:
                 ball_pos = self._ball_root_states[env_ids, :3]
             goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
+            # local_ball_pos[env_ids, :] = 0.0
+            # local_ball_pos[env_ids, 0] = 3.0
             self._goal_xy[env_ids] = goal_xy
             if self.priv_obs:
                 self._priv_goal_xy[env_ids] = goal_xy
 
+        # TODO hardcode goal position
+        # self._goal_xy[:, 0] = 3.0
+        # self._goal_xy[:, 1] = 0.0
+        # print('goal:', self._goal_xy[0])
+        # print('ball:', local_ball_pos[0])
         ob_curr = torch.cat([root_rot_obs, dof_pos, local_ball_pos], dim=-1)
         return ob_curr
 
@@ -349,7 +387,7 @@ class A1Dribbling(A1AMP):
         # states_idx = NUM_CURR_OBS * (self.history_steps + 1)
         # print('goal: ', self.obs_buf[:, states_idx:states_idx + 2])
         # print('xy: ', self._goal_xy)
-        self.extras["success"] = self._success_buf
+        # self.extras["success"] = self._success_buf
 
         # reset goal pos
         goal_reset_envs = (self.goal_step >= self.goal_terminate).nonzero(as_tuple=False).flatten()
@@ -363,6 +401,8 @@ class A1Dribbling(A1AMP):
         ball_rot = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self.initial_ball_pos[env_ids, 0] = torch.flatten(ball_dist * torch.cos(ball_rot)) + self._root_states[env_ids, 0]
         self.initial_ball_pos[env_ids, 1] = torch.flatten(ball_dist * torch.sin(ball_rot)) + self._root_states[env_ids, 1]
+        # self.initial_ball_pos[env_ids, 0] = 2.0
+        # self.initial_ball_pos[env_ids, 1] = 0.0
         self.initial_ball_pos[env_ids, 2] = BALL_RAD
         u = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device)
         v = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device)
@@ -385,6 +425,8 @@ class A1Dribbling(A1AMP):
         goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 0]
         self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 1]
+        # self._goal_pos[goal_reset_envs, 0] = 3.0
+        # self._goal_pos[goal_reset_envs, 1] = 0.0
         if not self.headless:
             self._goal_root_states[goal_reset_envs, :3] = self._goal_pos[goal_reset_envs]
             if set_goal:
@@ -402,7 +444,14 @@ class A1Dribbling(A1AMP):
             self._goal_xy[env_ids] += torch.rand_like(self._goal_xy[env_ids]) * 0.05
 
     def _compute_reset(self):
-        self.reset_buf[:], self._terminate_buf[:], self._success_buf[:] = compute_a1_reset(self.reset_buf, self.progress_buf,
+        # self.reset_buf[:], self._terminate_buf[:], self._success_buf[:] = compute_a1_reset(self.reset_buf, self.progress_buf,
+        #                                                              self._contact_forces, self._contact_body_ids,
+        #                                                              self._rigid_body_pos, self.max_episode_length,
+        #                                                              self._enable_early_termination,
+        #                                                              self._termination_height,
+        #                                                              self._goal_pos[:, :2], self._ball_root_states[:, :3], init_goal_dist, 
+        #                                                              self._pos_hist)
+        self.reset_buf[:], self._terminate_buf[:] = compute_a1_reset(self.reset_buf, self.progress_buf,
                                                                      self._contact_forces, self._contact_body_ids,
                                                                      self._rigid_body_pos, self.max_episode_length,
                                                                      self._enable_early_termination,
@@ -546,14 +595,14 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
 def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
                      max_episode_length, enable_early_termination, termination_height, goal, ball_pos, goal_dist,
                      pos_hist):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor, float, Tensor) -> Tuple[Tensor, Tensor, Tensor]
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor, float, Tensor) -> Tuple[Tensor, Tensor]
     terminated = torch.zeros_like(reset_buf)
 
     ball = ball_pos[:, :2]
     h = ball_pos[:, 2]
     bg_dist = (goal[:, 0] - ball[:, 0]) ** 2 + (goal[:, 1] - ball[:, 1]) ** 2
-    success = torch.zeros_like(reset_buf)
-    success = torch.where((bg_dist < 0.05) & (h <= 0.3), torch.ones_like(reset_buf), success)
+    # success = torch.zeros_like(reset_buf)
+    # success = torch.where((bg_dist < 0.05) & (h <= 0.3), torch.ones_like(reset_buf), success)
     p1 = pos_hist[:, 0, :].squeeze(1)
     p2 = pos_hist[:, 1, :].squeeze(1)
     p3 = pos_hist[:, 2, :].squeeze(1)
@@ -579,12 +628,13 @@ def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rig
         # so only check after first couple of steps
         has_fallen *= (progress_buf > 1)
         terminated = torch.where(has_fallen, torch.ones_like(reset_buf), terminated)
-        terminated = torch.where(success == 1., success, terminated)
+        # terminated = torch.where(success == 1., success, terminated)
         terminated = torch.where(fail == 1., fail, terminated)
 
     reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), terminated)
 
-    return reset, terminated, success
+    # return reset, terminated, success
+    return reset, terminated
 
 @torch.jit.script
 def compute_goal_observations(root_states, goal_pos, ball_pos):

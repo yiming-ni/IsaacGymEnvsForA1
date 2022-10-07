@@ -326,6 +326,7 @@ class A1Base(VecTask):
             for s in range(len(props)):
                 props[s].friction = self.friction_coeffs[env_id]
                 props[s].rolling_friction = self.rolling_friction_coeffs[env_id]
+                props[s].restitution = self.friction_coeffs[env_id]
 
         return props
 
@@ -958,10 +959,10 @@ class A1Base(VecTask):
 
     def _action_to_pd_targets(self, action):
         pd_tar = self._pd_action_offset + self._pd_action_scale * action
-        high = self.pd_tars + 0.2
-        low = self.pd_tars - 0.2
-        pd_tar = torch.clip(pd_tar, low, high)
-        self.pd_tars[...] = pd_tar[...]
+        # high = self.pd_tars + 0.2
+        # low = self.pd_tars - 0.2
+        # pd_tar = torch.clip(pd_tar, low, high)
+        # self.pd_tars[...] = pd_tar[...]
         return pd_tar
 
     def _init_camera(self):

@@ -387,12 +387,19 @@ class A1MotionLib(MotionLib):
         self._motion_dt = np.array(self._motion_dt)
         self._motion_num_frames = np.array(self._motion_num_frames)
 
-        num_motions = self.num_motions()
-        total_len = self.get_total_length()
+        self._refs = np.array([1, 2, 7, 8])
 
-        print("Loaded {:d} motions with a total length of {:.3f}s.".format(num_motions, total_len))
+        # num_motions = self.num_motions()
+        # total_len = self.get_total_length()
+
+        # print("Loaded {:d} motions with a total length of {:.3f}s.".format(num_motions, total_len))
 
         return
+
+    # remove this to use all motions
+    def sample_refs(self, n):
+        ref_ids = np.random.choice(self._refs, size=n, replace=True)
+        return ref_ids
 
     def _compute_dof_vels(self, num_frames, dt, local_rots):
         dof_vels = []
