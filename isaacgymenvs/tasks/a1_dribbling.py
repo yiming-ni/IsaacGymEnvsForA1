@@ -28,6 +28,7 @@ class A1Dribbling(A1AMP):
         self.goal_step = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
         self._success_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
         self._pos_hist = torch.zeros((self.num_envs, 3, 3), device=self.device, dtype=torch.float)
+        self._ball_hist = torch.zeros_like(self._pos_hist)
         self.add_ball_delay = self.cfg["task"]["noise"]["add_ball_delay"]
         self.push_ball = self.cfg['task']['domain_rand']['push_ball']
         self.delayed_ball_obs = torch.zeros((self.num_envs, 3, 3), dtype=torch.float, device=self.device)
@@ -382,8 +383,11 @@ class A1Dribbling(A1AMP):
         self.goal_step += 1
         self._prev_root_states[:] = self._root_states[:]
         self._prev_ball_states[:] = self._ball_root_states[:]
+        self._ball_hist[:, 0, :] = self._prev_ball_states[:, :3]
+        self._ball_hist[:, 1, :] = self._ball_root_states[:, :3]
         super().post_physics_step()
         self._pos_hist[:, 2, :] = self._root_states[:, :3]
+        self._ball_hist[:, 2, :] = self._ball_root_states[:, :3]
         # states_idx = NUM_CURR_OBS * (self.history_steps + 1)
         # print('goal: ', self.obs_buf[:, states_idx:states_idx + 2])
         # print('xy: ', self._goal_xy)
@@ -418,7 +422,7 @@ class A1Dribbling(A1AMP):
         return
 
     def _reset_goal_pos(self, goal_reset_envs, set_goal=False):
-        self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//2, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
+        self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//10, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
                                                              dtype=torch.int32)
         self.goal_step[goal_reset_envs] = 0
         goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * init_goal_dist
@@ -457,7 +461,7 @@ class A1Dribbling(A1AMP):
                                                                      self._enable_early_termination,
                                                                      self._termination_height,
                                                                      self._goal_pos[:, :2], self._ball_root_states[:, :3], init_goal_dist, 
-                                                                     self._pos_hist)
+                                                                     self._pos_hist, self._ball_hist)
         return
 
 
@@ -594,8 +598,8 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
 @torch.jit.script
 def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
                      max_episode_length, enable_early_termination, termination_height, goal, ball_pos, goal_dist,
-                     pos_hist):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor, float, Tensor) -> Tuple[Tensor, Tensor]
+                     pos_hist, ball_hist):
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor, float, Tensor, Tensor) -> Tuple[Tensor, Tensor]
     terminated = torch.zeros_like(reset_buf)
 
     ball = ball_pos[:, :2]
@@ -606,10 +610,27 @@ def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rig
     p1 = pos_hist[:, 0, :].squeeze(1)
     p2 = pos_hist[:, 1, :].squeeze(1)
     p3 = pos_hist[:, 2, :].squeeze(1)
+    b1 = ball_hist[:, 0, :].squeeze(1)
+    b2 = ball_hist[:, 1, :].squeeze(1)
+    b3 = ball_hist[:, 2, :].squeeze(1)
+    d1 = (p1[:, 0] - b1[:, 0]) ** 2 + (p1[:, 1] - b1[:, 1]) ** 2 + (p1[:, 2] - b1[:, 2]) ** 2
+    d2 = (p2[:, 0] - b2[:, 0]) ** 2 + (p2[:, 1] - b2[:, 1]) ** 2 + (p2[:, 2] - b2[:, 2]) ** 2
+    d3 = (p3[:, 0] - b3[:, 0]) ** 2 + (p3[:, 1] - b3[:, 1]) ** 2 + (p3[:, 2] - b3[:, 2]) ** 2
     v1 = (p2[:, 0] - p1[:, 0]) ** 2 + (p2[:, 1] - p1[:, 1]) ** 2 + (p2[:, 2] - p1[:, 2]) ** 2
     v2 = (p3[:, 0] - p2[:, 0]) ** 2 + (p3[:, 1] - p2[:, 1]) ** 2 + (p3[:, 2] - p2[:, 2]) ** 2
     fail = torch.zeros_like(reset_buf)
-    fail = torch.where((bg_dist > goal_dist ** 2 + 2.0) | ((v1 < 1e-5) & (v2 < 1e-5)), torch.ones_like(reset_buf), fail)
+    fail = torch.where((bg_dist > goal_dist ** 2 + 2.0), torch.ones_like(reset_buf), fail)
+    fail = torch.where(((v1 < 1e-5) & (v2 < 1e-5)), torch.ones_like(reset_buf), fail)
+    fail = torch.where(
+        ((0.25 <= d1) & 
+         (d1 <= d2) & 
+         (d2 <= d3) & 
+         (b1[:, 0] == b2[:, 0]) & 
+         (b1[:, 1] == b2[:, 1]) & 
+         (b1[:, 2] == b2[:, 2]) & 
+         (b2[:, 0] == b3[:, 0]) & 
+         (b2[:, 1] == b3[:, 1]) &
+         (b2[:, 2] == b3[:, 2])), torch.ones_like(reset_buf), fail)
 
     if (enable_early_termination):
         masked_contact_buf = contact_buf.clone()
