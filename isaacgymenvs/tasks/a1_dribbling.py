@@ -248,7 +248,9 @@ class A1Dribbling(A1AMP):
                                             self._ball_root_states[:, :2],
                                             self._prev_ball_states[:, :2],
                                             self.dt,
-                                            self.device)
+                                            self.device,
+                                            self.torques,
+                                            self._dof_vel)
         return
 
     def _compute_observations(self, env_ids=None):
@@ -561,8 +563,8 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
 
 
 @torch.jit.script
-def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt, device):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, Optional[Device]) -> Tensor
+def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt, device, torque, dof_vel):
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, Optional[Device], Tensor, Tensor) -> Tensor
 
     v1_char = (root_xy[:, 0] - prev_root_xy[:, 0]) / dt
     v2_char = (root_xy[:, 1] - prev_root_xy[:, 1]) / dt
@@ -590,12 +592,22 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
     ball_vel_reward = torch.exp(
         - torch.maximum(torch.zeros_like(v1_ball, dtype=torch.float, device=device),
                         1.0 - (d1 * v1_ball + d2 * v2_ball)) ** 2)
-    ball_vel_reward = torch.where(dist > 0.25, ball_vel_reward, torch.ones_like(ball_vel_reward, dtype=torch.float, device=device))
-    reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
+    ball_vel_reward = torch.where(dist > 0.04, ball_vel_reward, torch.ones_like(ball_vel_reward, dtype=torch.float, device=device))
+
+    # energy saving reward
+    energy_sum = torch.sum(torch.square(torque * dof_vel), dim=1)
+    energy_reward = torch.exp(- energy_sum)
+
+    # total task reward
+    reward = 0.075 * actor_vel_reward + 0.075 * dist_b_reward + 0.275 * ball_vel_reward + 0.475 * dist_reward + 0.1 * energy_reward
+    # reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
+
+    # override the reward to be the max if ball is close enough to ball
+    reward = torch.where(dist < 0.04, torch.ones_like(reward), reward)
     return reward
 
 
-@torch.jit.script
+# @torch.jit.script
 def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
                      max_episode_length, enable_early_termination, termination_height, goal, ball_pos, goal_dist,
                      pos_hist, ball_hist):
@@ -620,17 +632,17 @@ def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rig
     v2 = (p3[:, 0] - p2[:, 0]) ** 2 + (p3[:, 1] - p2[:, 1]) ** 2 + (p3[:, 2] - p2[:, 2]) ** 2
     fail = torch.zeros_like(reset_buf)
     fail = torch.where((bg_dist > goal_dist ** 2 + 2.0), torch.ones_like(reset_buf), fail)
-    fail = torch.where(((v1 < 1e-5) & (v2 < 1e-5)), torch.ones_like(reset_buf), fail)
-    fail = torch.where(
-        ((0.25 <= d1) & 
-         (d1 <= d2) & 
-         (d2 <= d3) & 
-         (b1[:, 0] == b2[:, 0]) & 
-         (b1[:, 1] == b2[:, 1]) & 
-         (b1[:, 2] == b2[:, 2]) & 
-         (b2[:, 0] == b3[:, 0]) & 
-         (b2[:, 1] == b3[:, 1]) &
-         (b2[:, 2] == b3[:, 2])), torch.ones_like(reset_buf), fail)
+    # fail = torch.where(((v1 < 1e-5) & (v2 < 1e-5)), torch.ones_like(reset_buf), fail)
+    # fail = torch.where(
+    #     ((0.25 <= d1) & 
+    #      (d1 <= d2) & 
+    #      (d2 <= d3) & 
+    #      (b1[:, 0] == b2[:, 0]) & 
+    #      (b1[:, 1] == b2[:, 1]) & 
+    #      (b1[:, 2] == b2[:, 2]) & 
+    #      (b2[:, 0] == b3[:, 0]) & 
+    #      (b2[:, 1] == b3[:, 1]) &
+    #      (b2[:, 2] == b3[:, 2])), torch.ones_like(reset_buf), fail)
 
     if (enable_early_termination):
         masked_contact_buf = contact_buf.clone()
