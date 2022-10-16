@@ -565,7 +565,6 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
 @torch.jit.script
 def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt, device, torque, dof_vel):
     # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, Optional[Device], Tensor, Tensor) -> Tensor
-
     v1_char = (root_xy[:, 0] - prev_root_xy[:, 0]) / dt
     v2_char = (root_xy[:, 1] - prev_root_xy[:, 1]) / dt
     v1_ball = (ball_xy[:, 0] - prev_ball_xy[:, 0]) / dt
@@ -577,8 +576,8 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
 
     d_ball = diff_b / torch.sqrt_(dist_b).reshape(-1, 1)
     actor_vel_reward = torch.exp(
-        - 1.5 * torch.maximum(torch.zeros_like(v1_char, dtype=torch.float, device=device),
-                        1.0 - (d_ball[:, 0] * v1_char + d_ball[:, 1] * v2_char)) ** 2)
+        - 2.0 * torch.maximum(torch.zeros_like(v1_char, dtype=torch.float, device=device),
+                        1.0 - (d_ball[:, 0] * v1_char + d_ball[:, 1] * v2_char)) ** 2) #1.5
 
     x_diff = goal_xy[:, 0] - ball_xy[:, 0]
     y_diff = goal_xy[:, 1] - ball_xy[:, 1]
@@ -593,30 +592,37 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
     ball_vel_reward = torch.exp(
         - 2*torch.maximum(torch.zeros_like(v1_ball, dtype=torch.float, device=device),
                         1.0 - (d1 * v1_ball + d2 * v2_ball)) ** 2)
-    ball_vel_reward = torch.where(dist > 0.04, ball_vel_reward, torch.ones_like(ball_vel_reward, dtype=torch.float, device=device))
+    ball_vel_reward = torch.where(dist > 0.2, ball_vel_reward, torch.ones_like(ball_vel_reward, dtype=torch.float, device=device))
 
     # energy saving reward
     energy_sum = torch.sum(torch.square(torque * dof_vel), dim=1)
-    energy_reward = torch.exp(- 0.5 * energy_sum)
+    energy_reward = torch.exp(- 1e-3 * energy_sum)
 
-    # total task reward
-    # reward = 0.08 * actor_vel_reward + 0.08 * dist_b_reward + 0.28 * ball_vel_reward + 0.48 * dist_reward + 0.08 * energy_reward
-    reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
+    # piecewise task reward
+    far_reward = 0.5 * actor_vel_reward + 0.5 * dist_b_reward
+    near_reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
+    reward = torch.where(dist_b > 1.5, far_reward, near_reward)
+
+    # consistent task reward
+    # reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
+
 
     # override the reward to be the max if ball is close enough to ball
-    reward = torch.where(dist < 0.04, torch.ones_like(reward), reward)
-    # print('total: {}, dist_r:{}, actor_d:{}, energy:{}, actor_vel:{}, b_vel:{}'.format(reward, 
-    # 0.48*dist_reward,
-    # 0.08*dist_b_reward,
-    #  0.08*energy_reward,
-    #  0.08*actor_vel_reward,
-    #  0.28*ball_vel_reward))
+    reward = torch.where(dist < 0.2, torch.ones_like(reward), reward)
 
     total_reward = 0.9 * reward + 0.1 * energy_reward
+
+    # test printouts
+    # print('actor_dist:{}, reward:{}'.format(dist_b, reward))
+    # print('total: {}, reward:{}, dist_r:{}, actor_dist:{}, energy:{}, actor_vel:{}, b_vel:{}'.format(
+    #     total_reward, reward, dist_reward, dist_b_reward, energy_reward, actor_vel_reward, ball_vel_reward))
+    # print('inner product ball&robot:', torch.maximum(torch.zeros_like(v1_char, dtype=torch.float, device=device),
+    #                     1.0 - (d_ball[:, 0] * v1_char + d_ball[:, 1] * v2_char)) ** 2, actor_vel_reward)
+
     return total_reward
 
 
-# @torch.jit.script
+@torch.jit.script
 def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
                      max_episode_length, enable_early_termination, termination_height, goal, ball_pos, goal_dist,
                      pos_hist, ball_hist):
