@@ -32,6 +32,12 @@ class A1Dribbling(A1AMP):
         self.add_ball_delay = self.cfg["task"]["noise"]["add_ball_delay"]
         self.push_ball = self.cfg['task']['domain_rand']['push_ball']
         self.delayed_ball_obs = torch.zeros((self.num_envs, 3, 3), dtype=torch.float, device=self.device)
+        self.actor_vel_scale = self.cfg["task"]["reward"]["actor_vel_scale"]
+        self.ball_vel_scale = self.cfg["task"]["reward"]["ball_vel_scale"]
+        self.energy_scale = self.cfg["task"]["reward"]["energy_scale"]
+        self.energy_weight = self.cfg["task"]["reward"]["energy_weight"]
+        self.ab_dist_threshold = self.cfg["task"]["reward"]["ab_dist_threshold"]
+        self.piecewise = self.cfg["task"]["reward"]["piecewise"]
 
     def get_obs_size(self):
         obs_size = super().get_obs_size()
@@ -250,7 +256,13 @@ class A1Dribbling(A1AMP):
                                             self.dt,
                                             self.device,
                                             self.torques,
-                                            self._dof_vel)
+                                            self._dof_vel,
+                                            self.actor_vel_scale,
+                                            self.ball_vel_scale,
+                                            self.energy_scale,
+                                            self.energy_weight,
+                                            self.ab_dist_threshold,
+                                            self.piecewise)
         return
 
     def _compute_observations(self, env_ids=None):
@@ -424,7 +436,7 @@ class A1Dribbling(A1AMP):
         return
 
     def _reset_goal_pos(self, goal_reset_envs, set_goal=False):
-        self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//10, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
+        self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//2, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
                                                              dtype=torch.int32)
         self.goal_step[goal_reset_envs] = 0
         goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * init_goal_dist
@@ -563,8 +575,8 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
 
 
 @torch.jit.script
-def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt, device, torque, dof_vel):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, Optional[Device], Tensor, Tensor) -> Tensor
+def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt, device, torque, dof_vel, actor_vel_scale, ball_vel_scale, energy_scale, energy_weight, ab_dist_threshold, piecewise):
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, Optional[Device], Tensor, Tensor, float, float, float, float, float, bool) -> Tensor
     v1_char = (root_xy[:, 0] - prev_root_xy[:, 0]) / dt
     v2_char = (root_xy[:, 1] - prev_root_xy[:, 1]) / dt
     v1_ball = (ball_xy[:, 0] - prev_ball_xy[:, 0]) / dt
@@ -576,8 +588,8 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
 
     d_ball = diff_b / torch.sqrt_(dist_b).reshape(-1, 1)
     actor_vel_reward = torch.exp(
-        - 2.0 * torch.maximum(torch.zeros_like(v1_char, dtype=torch.float, device=device),
-                        1.0 - (d_ball[:, 0] * v1_char + d_ball[:, 1] * v2_char)) ** 2) #1.5
+        - actor_vel_scale * torch.maximum(torch.zeros_like(v1_char, dtype=torch.float, device=device),
+                        1.0 - (d_ball[:, 0] * v1_char + d_ball[:, 1] * v2_char)) ** 2) #2
 
     x_diff = goal_xy[:, 0] - ball_xy[:, 0]
     y_diff = goal_xy[:, 1] - ball_xy[:, 1]
@@ -590,27 +602,29 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
     d2 = y_diff / d_len
     # decrease std for ball_vel gaussian
     ball_vel_reward = torch.exp(
-        - 2*torch.maximum(torch.zeros_like(v1_ball, dtype=torch.float, device=device),
+        - ball_vel_scale * torch.maximum(torch.zeros_like(v1_ball, dtype=torch.float, device=device),
                         1.0 - (d1 * v1_ball + d2 * v2_ball)) ** 2)
     ball_vel_reward = torch.where(dist > 0.2, ball_vel_reward, torch.ones_like(ball_vel_reward, dtype=torch.float, device=device))
 
     # energy saving reward
     energy_sum = torch.sum(torch.square(torque * dof_vel), dim=1)
-    energy_reward = torch.exp(- 1e-3 * energy_sum)
+    energy_reward = torch.exp(- energy_scale * energy_sum)
 
     # piecewise task reward
-    far_reward = 0.5 * actor_vel_reward + 0.5 * dist_b_reward
-    near_reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
-    reward = torch.where(dist_b > 1.5, far_reward, near_reward)
+    if piecewise:
+        far_reward = 0.5 * actor_vel_reward + 0.5 * dist_b_reward
+        near_reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
+        reward = torch.where(dist_b > ab_dist_threshold, far_reward, near_reward)
 
     # consistent task reward
-    # reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
+    else:
+        reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
 
 
     # override the reward to be the max if ball is close enough to ball
     reward = torch.where(dist < 0.2, torch.ones_like(reward), reward)
 
-    total_reward = 0.9 * reward + 0.1 * energy_reward
+    total_reward = (1 - energy_weight) * reward + energy_weight * energy_reward
 
     # test printouts
     # print('actor_dist:{}, reward:{}'.format(dist_b, reward))
