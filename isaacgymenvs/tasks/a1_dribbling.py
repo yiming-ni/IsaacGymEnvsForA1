@@ -436,8 +436,11 @@ class A1Dribbling(A1AMP):
         return
 
     def _reset_goal_pos(self, goal_reset_envs, set_goal=False):
-        self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//2, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
-                                                             dtype=torch.int32)
+        if self.headless:
+            self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//2, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
+                                                                dtype=torch.int32)
+        else: self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//10, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
+                                                                dtype=torch.int32)
         self.goal_step[goal_reset_envs] = 0
         goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * init_goal_dist
         goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
