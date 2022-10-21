@@ -204,4 +204,5 @@ task:
     energy_weight: 0.1
     ab_dist_threshold: 1.5
     piecewise: True
+  goal_reset_freq_inv: 4
 

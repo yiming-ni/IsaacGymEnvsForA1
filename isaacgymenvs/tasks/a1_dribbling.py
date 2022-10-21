@@ -38,6 +38,7 @@ class A1Dribbling(A1AMP):
         self.energy_weight = self.cfg["task"]["reward"]["energy_weight"]
         self.ab_dist_threshold = self.cfg["task"]["reward"]["ab_dist_threshold"]
         self.piecewise = self.cfg["task"]["reward"]["piecewise"]
+        self.goal_reset = self.cfg["task"]["goal_reset_freq_inv"]
 
     def get_obs_size(self):
         obs_size = super().get_obs_size()
@@ -437,7 +438,7 @@ class A1Dribbling(A1AMP):
 
     def _reset_goal_pos(self, goal_reset_envs, set_goal=False):
         if self.headless:
-            self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//2, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
+            self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//self.goal_reset, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
                                                                 dtype=torch.int32)
         else: self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//10, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
                                                                 dtype=torch.int32)
@@ -631,7 +632,7 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
 
     # test printouts
     # print('actor_dist:{}, reward:{}'.format(dist_b, reward))
-    # print('total: {}, reward:{}, dist_r:{}, actor_dist:{}, energy:{}, actor_vel:{}, b_vel:{}'.format(
+    # print('total_rew: {}, rew:{}, dist_rew:{}, actor_dist_rew:{}, energy:{}, actor_vel:{}, ball_vel:{}'.format(
     #     total_reward, reward, dist_reward, dist_b_reward, energy_reward, actor_vel_reward, ball_vel_reward))
     # print('inner product ball&robot:', torch.maximum(torch.zeros_like(v1_char, dtype=torch.float, device=device),
     #                     1.0 - (d_ball[:, 0] * v1_char + d_ball[:, 1] * v2_char)) ** 2, actor_vel_reward)

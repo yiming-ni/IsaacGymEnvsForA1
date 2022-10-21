@@ -54,7 +54,7 @@ class TestMotion(A1AMP):
             super()._create_marker_actors(env_ptr, marker_asset, init_marker_pos, i)
         return
 
-    def _create_marker_envs(self):
+    def _create_marker_envs(self, asset_ops):
         if self.add_markers:
             marker_asset_options = gymapi.AssetOptions()
             marker_asset_options.angular_damping = 0.0
@@ -68,7 +68,7 @@ class TestMotion(A1AMP):
             self.num_markers = 4
             return marker_asset, init_marker_pos
         else:
-            super()._create_marker_envs()
+            super()._create_marker_envs(asset_ops)
             return 0, 0
 
 
