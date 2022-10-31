@@ -164,12 +164,14 @@ class A1Dribbling(A1AMP):
         self.initial_ball_pos[..., 5] = torch.flatten(torch.sqrt_(u) * torch.sin(w * torch.pi * 2))
         self.initial_ball_pos[..., 6] = torch.flatten(torch.sqrt_(u) * torch.cos(w * torch.pi * 2))
 
-        # ball_asset_opts = gymapi.AssetOptions()
-        # ball_asset_opts.fix_base_link = True
         if "asset" in self.cfg["env"]:
             asset_file = self.cfg["env"]["asset"]["ballAsset"]
         asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
-        ball_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_opts)
+
+        ball_asset_opts = gymapi.AssetOptions()
+        ball_asset_opts.fix_base_link = False
+        ball_asset_opts.use_mesh_materials = True
+        ball_asset = self.gym.load_asset(self.sim, asset_root, asset_file, ball_asset_opts)
         init_ball_pos = gymapi.Transform()
         self.num_markers = 1
         asset.append(ball_asset)
@@ -420,8 +422,8 @@ class A1Dribbling(A1AMP):
         ball_rot = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self.initial_ball_pos[env_ids, 0] = torch.flatten(ball_dist * torch.cos(ball_rot)) + self._root_states[env_ids, 0]
         self.initial_ball_pos[env_ids, 1] = torch.flatten(ball_dist * torch.sin(ball_rot)) + self._root_states[env_ids, 1]
-        # self.initial_ball_pos[env_ids, 0] = 2.0
-        # self.initial_ball_pos[env_ids, 1] = 0.0
+        # self.initial_ball_pos[env_ids, 0] = 2.4
+        # self.initial_ball_pos[env_ids, 1] = 0.6
         self.initial_ball_pos[env_ids, 2] = BALL_RAD
         u = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device)
         v = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device)
@@ -438,7 +440,7 @@ class A1Dribbling(A1AMP):
 
     def _reset_goal_pos(self, goal_reset_envs, set_goal=False):
         if self.headless:
-            self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//self.goal_reset, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
+            self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//self.goal_reset, self.max_episode_length//2, (len(goal_reset_envs),), device=self.device,
                                                                 dtype=torch.int32)
         else: self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//10, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
                                                                 dtype=torch.int32)
@@ -447,7 +449,7 @@ class A1Dribbling(A1AMP):
         goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
         self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 0]
         self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 1]
-        # self._goal_pos[goal_reset_envs, 0] = 3.0
+        # self._goal_pos[goal_reset_envs, 0] = 3.6
         # self._goal_pos[goal_reset_envs, 1] = 0.0
         if not self.headless:
             self._goal_root_states[goal_reset_envs, :3] = self._goal_pos[goal_reset_envs]
