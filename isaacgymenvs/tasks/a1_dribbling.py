@@ -134,8 +134,8 @@ class A1Dribbling(A1AMP):
         ball_init_pos.p.y = self.initial_ball_pos[i, 1]
         ball_init_pos.p.z = self.initial_ball_pos[i, 2]
         ball_handle = self.gym.create_actor(env_ptr, ball_asset, ball_init_pos, "ball", i, 0, 0)
-        self.gym.set_rigid_body_color(env_ptr, ball_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
-                                      gymapi.Vec3(1, 1, 0))
+        # self.gym.set_rigid_body_color(env_ptr, ball_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
+        #                               gymapi.Vec3(1, 1, 0))
         if not self.headless:
             goal_asset, goal_init_pos = marker_asset[1], init_goal_pos[1]
             goal_init_pos.p.x = self._goal_pos[i, 0]
@@ -170,7 +170,7 @@ class A1Dribbling(A1AMP):
 
         ball_asset_opts = gymapi.AssetOptions()
         ball_asset_opts.fix_base_link = False
-        ball_asset_opts.use_mesh_materials = True
+        # ball_asset_opts.use_mesh_materials = True
         ball_asset = self.gym.load_asset(self.sim, asset_root, asset_file, ball_asset_opts)
         init_ball_pos = gymapi.Transform()
         self.num_markers = 1

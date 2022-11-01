@@ -326,6 +326,7 @@ class A1Base(VecTask):
             for s in range(len(props)):
                 props[s].friction = self.friction_coeffs[env_id]
                 props[s].rolling_friction = self.rolling_friction_coeffs[env_id]
+                # props[s].torsion_friction = 0
                 props[s].restitution = self.friction_coeffs[env_id]
 
         return props
@@ -425,6 +426,30 @@ class A1Base(VecTask):
         plane_params.restitution = self.plane_restitution
         # plane_params.distance = 2  #TODO only for testing ref
         self.gym.add_ground(self.sim, plane_params)
+
+        # self.top = 9
+        # mesh_vertices = np.array([
+        #     [-10, -10, self.top + .2],
+        #     [-10, 10, 0.2],
+        #     [10, -10, 0.2],
+        #     [10, 10, 0.2]]).astype(np.float32)
+        # mesh_triangles = np.array([
+        #     [1, 2, 3],
+        #     [0, 2, 3],
+        #     [0, 1, 3],
+        #     ]).astype(np.uint32)
+        # tm_params = gymapi.TriangleMeshParams()
+        # tm_params.nb_vertices = mesh_vertices.shape[0]
+        # tm_params.nb_triangles = mesh_triangles.shape[0]
+        # tm_params.transform.p.x = 0.0
+        # tm_params.transform.p.y = 0.0
+        # tm_params.transform.p.z = 0.0
+        # tm_params.static_friction = self.plane_static_friction
+        # tm_params.dynamic_friction = 0
+        # tm_params.restitution = self.plane_restitution
+        # self.gym.add_triangle_mesh(self.sim, mesh_vertices.flatten(order='C'),
+        #                         mesh_triangles.flatten(order='C'),
+        #                         tm_params)
         return
 
     def _create_envs(self, num_envs, spacing, num_per_row):
