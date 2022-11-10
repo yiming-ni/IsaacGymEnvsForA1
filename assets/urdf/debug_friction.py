@@ -170,9 +170,9 @@ for i in range(num_envs):
     props = gym.get_actor_rigid_shape_properties(env, actor_handle)
     for p_idx in range(len(props)):
         props[p_idx].friction = static_friction_all
-        props[p_idx].rolling_friction = 0
-        props[p_idx].torsion_friction = 0
-        props[p_idx].restitution = 0
+        props[p_idx].rolling_friction = 0.5
+        props[p_idx].torsion_friction = 0.5
+        props[p_idx].restitution = 0.5
     gym.set_actor_rigid_shape_properties(env, actor_handle, props)
     ################################################
 

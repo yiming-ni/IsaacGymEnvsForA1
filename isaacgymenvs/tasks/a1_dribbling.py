@@ -442,7 +442,7 @@ class A1Dribbling(A1AMP):
         if self.headless:
             self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//self.goal_reset, self.max_episode_length//2, (len(goal_reset_envs),), device=self.device,
                                                                 dtype=torch.int32)
-        else: self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//10, self.max_episode_length, (len(goal_reset_envs),), device=self.device,
+        else: self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//10, self.max_episode_length//3, (len(goal_reset_envs),), device=self.device,
                                                                 dtype=torch.int32)
         self.goal_step[goal_reset_envs] = 0
         goal_dist = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * init_goal_dist
