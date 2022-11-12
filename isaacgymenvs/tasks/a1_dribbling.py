@@ -305,7 +305,7 @@ class A1Dribbling(A1AMP):
                 dof_pos = self._dof_pos
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
-            root_rot_obs = quat_to_tan_norm(root_quat)
+            # root_rot_obs = quat_to_tan_norm(root_quat)
             # goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
             # goal_pos[..., 2] = 0.2
             goal_pos = self._goal_pos
@@ -333,7 +333,7 @@ class A1Dribbling(A1AMP):
                 dof_pos = self._dof_pos[env_ids]
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
-            root_rot_obs = quat_to_tan_norm(root_quat)
+            # root_rot_obs = quat_to_tan_norm(root_quat)
             # goal_pos = torch.zeros((len(env_ids), 3), dtype=torch.float, device=self.device)
             # goal_pos[..., 2] = 0.2
             goal_pos = self._goal_pos[env_ids]
@@ -355,7 +355,7 @@ class A1Dribbling(A1AMP):
         # self._goal_xy[:, 1] = 0.0
         # print('goal:', self._goal_xy[0])
         # print('ball:', local_ball_pos[0])
-        ob_curr = torch.cat([root_rot_obs, dof_pos, local_ball_pos], dim=-1)
+        ob_curr = torch.cat([root_quat, dof_pos, local_ball_pos], dim=-1)
         return ob_curr
 
     def reset_idx(self, env_ids):
@@ -595,7 +595,7 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
     d_ball = diff_b / torch.sqrt_(dist_b).reshape(-1, 1)
     actor_vel_reward = torch.exp(
         - actor_vel_scale * torch.maximum(torch.zeros_like(v1_char, dtype=torch.float, device=device),
-                        1.0 - (d_ball[:, 0] * v1_char + d_ball[:, 1] * v2_char)) ** 2) #2
+                        0.5 - (d_ball[:, 0] * v1_char + d_ball[:, 1] * v2_char)) ** 2) #2
 
     x_diff = goal_xy[:, 0] - ball_xy[:, 0]
     y_diff = goal_xy[:, 1] - ball_xy[:, 1]
@@ -606,31 +606,39 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
     d_len = torch.sqrt_(dist)
     d1 = x_diff / d_len
     d2 = y_diff / d_len
-    # decrease std for ball_vel gaussian
-    ball_vel_reward = torch.exp(
-        - ball_vel_scale * torch.maximum(torch.zeros_like(v1_ball, dtype=torch.float, device=device),
-                        1.0 - (d1 * v1_ball + d2 * v2_ball)) ** 2)
-    ball_vel_reward = torch.where(dist > 0.2, ball_vel_reward, torch.ones_like(ball_vel_reward, dtype=torch.float, device=device))
 
-    # energy saving reward
-    energy_sum = torch.sum(torch.square(torque * dof_vel), dim=1)
-    energy_reward = torch.exp(- energy_scale * energy_sum)
+    # Piecewise dist+vel reward
+    # ball_vel_reward = torch.exp(
+    #     - ball_vel_scale * torch.maximum(torch.zeros_like(v1_ball, dtype=torch.float, device=device),
+    #                     0.5 - (d1 * v1_ball + d2 * v2_ball)) ** 2)
+    # ball_vel_reward = torch.where(dist > 0.2, ball_vel_reward, torch.ones_like(ball_vel_reward, dtype=torch.float, device=device))
 
-    # piecewise task reward
-    if piecewise:
-        far_reward = 0.5 * actor_vel_reward + 0.5 * dist_b_reward
-        near_reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
-        reward = torch.where(dist_b > ab_dist_threshold, far_reward, near_reward)
+    # # energy saving reward
+    # energy_sum = torch.sum(torch.square(torque * dof_vel), dim=1)
+    # energy_reward = torch.exp(- energy_scale * energy_sum)
 
-    # consistent task reward
-    else:
-        reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
+    # if piecewise:
+    #     far_reward = 0.5 * actor_vel_reward + 0.5 * dist_b_reward
+    #     near_reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
+    #     reward = torch.where(dist_b > ab_dist_threshold, far_reward, near_reward)
+    # else:
+    #     reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
 
+    # # override the reward to be the max if ball is close enough to ball
+    # reward = torch.where(dist < 0.2, torch.ones_like(reward), reward)
+    # total_reward = (1 - energy_weight) * reward + energy_weight * energy_reward
 
-    # override the reward to be the max if ball is close enough to ball
-    reward = torch.where(dist < 0.2, torch.ones_like(reward), reward)
-
-    total_reward = (1 - energy_weight) * reward + energy_weight * energy_reward
+    # only tracks the velocity
+    ball_vel = d1 * v1_ball + d2 * v2_ball
+    actor_vel = d_ball[:, 0] * v1_char + d_ball[:, 1] * v2_char
+    ball_vel_static = tolerance(ball_vel, 0., 0., 0.05)
+    ball_vel_move = tolerance(ball_vel, 0.2, 0.5, 0.1)
+    actor_vel_static = tolerance(actor_vel, 0., 0., 0.1)
+    actor_vel_move = tolerance(actor_vel, 0.2, 1., 1.)
+    ball_vel_reward = torch.where(dist<0.2, ball_vel_static, ball_vel_move)
+    actor_vel_reward = torch.where(dist<0.2, actor_vel_static, torch.where(dist_b<0.2, actor_vel_static, actor_vel_move))
+    task_complete_reward = torch.where(dist<0.2, torch.ones_like(actor_vel_reward), torch.zeros_like(actor_vel_reward))
+    total_reward = 0.3 * actor_vel_reward + 0.5 * ball_vel_reward + 0.2 * task_complete_reward
 
     # test printouts
     # print('actor_dist:{}, reward:{}'.format(dist_b, reward))

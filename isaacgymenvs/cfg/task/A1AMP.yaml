@@ -201,7 +201,7 @@ task:
     actor_vel_scale: 1.5
     ball_vel_scale: 2.0
     energy_scale: 0.001
-    energy_weight: 0.1
+    energy_weight: 0
     ab_dist_threshold: 1.5
     piecewise: True
   goal_reset_freq_inv: 4
