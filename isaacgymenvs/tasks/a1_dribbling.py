@@ -305,7 +305,7 @@ class A1Dribbling(A1AMP):
                 dof_pos = self._dof_pos
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
-            # root_rot_obs = quat_to_tan_norm(root_quat)
+            # root_quat = quat_to_tan_norm(root_quat)
             # goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
             # goal_pos[..., 2] = 0.2
             goal_pos = self._goal_pos
@@ -333,7 +333,7 @@ class A1Dribbling(A1AMP):
                 dof_pos = self._dof_pos[env_ids]
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
-            # root_rot_obs = quat_to_tan_norm(root_quat)
+            # root_quat = quat_to_tan_norm(root_quat)
             # goal_pos = torch.zeros((len(env_ids), 3), dtype=torch.float, device=self.device)
             # goal_pos[..., 2] = 0.2
             goal_pos = self._goal_pos[env_ids]
