@@ -632,13 +632,14 @@ def compute_a1_reward(root_xy, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt,
     ball_vel = d1 * v1_ball + d2 * v2_ball
     actor_vel = d_ball[:, 0] * v1_char + d_ball[:, 1] * v2_char
     ball_vel_static = tolerance(ball_vel, 0., 0., 0.05)
-    ball_vel_move = tolerance(ball_vel, 0.2, 0.5, 0.1)
+    ball_vel_move = tolerance(ball_vel, 0.5, 1, 0.2)
     actor_vel_static = tolerance(actor_vel, 0., 0., 0.1)
-    actor_vel_move = tolerance(actor_vel, 0.2, 1., 1.)
-    ball_vel_reward = torch.where(dist<0.2, ball_vel_static, ball_vel_move)
-    actor_vel_reward = torch.where(dist<0.2, actor_vel_static, torch.where(dist_b<0.2, actor_vel_static, actor_vel_move))
-    task_complete_reward = torch.where(dist<0.2, torch.ones_like(actor_vel_reward), torch.zeros_like(actor_vel_reward))
-    total_reward = 0.3 * actor_vel_reward + 0.5 * ball_vel_reward + 0.2 * task_complete_reward
+    actor_vel_move = tolerance(actor_vel, 0.5, 1., 1.)
+    ball_vel_static = torch.where(dist<0.2, ball_vel_static, torch.zeros_like(ball_vel_static))
+    ball_vel_move = torch.where(dist<0.2, torch.ones_like(ball_vel_move), ball_vel_move)
+    actor_vel_static = torch.where(dist<0.2, torch.ones_like(actor_vel_static), torch.where(dist_b<0.2, actor_vel_static, torch.zeros_like(actor_vel_static)))
+    actor_vel_move = torch.where(dist<0.2, torch.ones_like(actor_vel_move), torch.where(dist_b<0.2, torch.ones_like(actor_vel_move), actor_vel_move))
+    total_reward = 0.1 * actor_vel_static + 0.1 * actor_vel_move + 0.4 * ball_vel_static + 0.4 * ball_vel_move
 
     # test printouts
     # print('actor_dist:{}, reward:{}'.format(dist_b, reward))

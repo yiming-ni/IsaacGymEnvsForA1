@@ -83,7 +83,7 @@ plane_params = gymapi.PlaneParams()
 plane_params.normal = gymapi.Vec3(0.0, 0.0, 1.0)
 
 plane_params.static_friction = static_friction_all
-plane_params.dynamic_friction = 0
+plane_params.dynamic_friction = 1
 plane_params.restitution = 0
 
 gym.add_ground(sim, plane_params)
@@ -109,7 +109,7 @@ tm_params.transform.p.x = 0.0
 tm_params.transform.p.y = 0.0
 tm_params.transform.p.z = 0.0
 tm_params.static_friction = static_friction_all
-tm_params.dynamic_friction = 0
+tm_params.dynamic_friction = 1
 tm_params.restitution = 0
 gym.add_triangle_mesh(sim, mesh_vertices.flatten(order='C'),
                         mesh_triangles.flatten(order='C'),
@@ -169,10 +169,10 @@ for i in range(num_envs):
     ################################################
     props = gym.get_actor_rigid_shape_properties(env, actor_handle)
     for p_idx in range(len(props)):
-        props[p_idx].friction = static_friction_all
-        props[p_idx].rolling_friction = 0.5
-        props[p_idx].torsion_friction = 0.5
-        props[p_idx].restitution = 0.5
+        props[p_idx].friction = 0
+        props[p_idx].rolling_friction = 0
+        props[p_idx].torsion_friction = 0
+        props[p_idx].restitution = 0
     gym.set_actor_rigid_shape_properties(env, actor_handle, props)
     ################################################
 
