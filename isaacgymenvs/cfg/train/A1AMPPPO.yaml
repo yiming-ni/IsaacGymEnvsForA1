@@ -46,6 +46,7 @@ params:
   load_path: ${...checkpoint} # path to the checkpoint to load
 
   config:
+    device: ${....rl_device}
     name: ${resolve_default:A1AMP,${....experiment}}
     full_experiment_name: ${.name}
     env_name: rlgpu
