@@ -3,10 +3,12 @@ name: A1AMP
 
 physics_engine: ${..physics_engine}
 
+rl_device: ${..rl_device}
+
 # if given, will override the device setting in gym.
 env:
   priv_obs: false
-  historySteps:
+  historySteps: 15
   numEnvs: ${resolve_default:4096,${...num_envs}}
   envSpacing: 3
   episodeLength: 300
@@ -29,14 +31,6 @@ env:
   motion_file: "dataset.yaml"
 #  motion_file: "a1_ig_ofstv1_pace.json"
 #  motion_file: "a1_ig_ofstv1_trot2.json"
-
-  # these motions should use hyperparameters from HumanoidAMPPPO.yaml
-  #motion_file: "amp_humanoid_run.npy"
-  #motion_file: "amp_humanoid_dance.npy"
-
-  # these motions should use hyperparameters from HumanoidAMPPPOLowGP.yaml
-  #motion_file: "amp_humanoid_hop.npy"
-  #motion_file: "amp_humanoid_backflip.npy"
 
   asset:
     assetFileName: "urdf/a1_ig.urdf"
@@ -170,24 +164,24 @@ task:
           soft_dof_torque_limit: 1
 
   domain_rand:
-    randomize_friction: False
-    friction_range: [0.05, 5.0]
-    randomize_joint_friction: False
+    randomize_friction: True
+    friction_range: [0., 0.5]
+    randomize_joint_friction: True
     joint_friction_std: 0.01
-    randomize_base_mass: False
-    mass_ratio_range: 0.5
+    randomize_base_mass: True
+    mass_ratio_range: 0.75
     inertia_ratio_range: 0.2
-    randomize_PD: False
-    push_robots: False
+    randomize_PD: True
+    push_robots: True
     push_interval_s: 0.2
     push_ball: False
 
   noise:
-    add_noise: False
+    add_noise: True
     add_delay: False
     noise_level: 1.0 # scales other values
     delay_bound: [0.0004, 0.025] #40
-    add_ball_delay: False
+    add_ball_delay: True
     noise_scales:
       base_quat: 0.01
       dof_pos: 0.01
@@ -196,13 +190,13 @@ task:
       gravity: 0.05
       height_measurements: 0.1
 
-  action_filter: False
+  action_filter: True
   reward:
     actor_vel_scale: 1.5
     ball_vel_scale: 2.0
     energy_scale: 0.001
-    energy_weight: 0
+    energy_weight: 0.01
     ab_dist_threshold: 1.5
-    piecewise: True
+    piecewise: False
   goal_reset_freq_inv: 4
 
