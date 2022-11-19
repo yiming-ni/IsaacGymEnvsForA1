@@ -199,4 +199,6 @@ task:
     ab_dist_threshold: 1.5
     piecewise: False
   goal_reset_freq_inv: 4
+  is_additive: True
+  local_vel: False
 

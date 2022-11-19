@@ -327,7 +327,7 @@ class A1Base(VecTask):
                 props[s].friction = self.friction_coeffs[env_id]
                 props[s].rolling_friction = self.rolling_friction_coeffs[env_id]
                 # props[s].torsion_friction = 0
-                props[s].restitution = self.friction_coeffs[env_id]
+                # props[s].restitution = self.friction_coeffs[env_id]
 
         return props
 

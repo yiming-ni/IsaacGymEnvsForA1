@@ -251,6 +251,7 @@ class A1Dribbling(A1AMP):
         return
 
     def _compute_reward(self, actions):
+        is_additive = self.cfg['task']['is_additive']
         self.rew_buf[:] = compute_a1_reward(self._root_states,
                                             self._prev_root_states[:, :2],
                                             self._goal_pos,
@@ -264,7 +265,9 @@ class A1Dribbling(A1AMP):
                                             self.energy_scale,
                                             self.energy_weight,
                                             self.ab_dist_threshold,
-                                            self.piecewise)
+                                            self.piecewise,
+                                            is_additive,
+                                            )
         return
 
     def _compute_observations(self, env_ids=None):
@@ -582,8 +585,8 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
 @torch.jit.script
 def compute_a1_reward(
     root_states, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt, torque, 
-    dof_vel, actor_vel_scale, ball_vel_scale, energy_scale, energy_weight, ab_dist_threshold, piecewise):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, Tensor, Tensor, float, float, float, float, float, bool) -> Tensor
+    dof_vel, actor_vel_scale, ball_vel_scale, energy_scale, energy_weight, ab_dist_threshold, piecewise, additive):
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, Tensor, Tensor, float, float, float, float, float, bool, bool) -> Tensor
     
     root_xy = root_states[:, :2]
     # energy saving reward
@@ -618,12 +621,21 @@ def compute_a1_reward(
     ball_vel_move = tolerance(ball_vel, 0.5, 1., 0.2)
     actor_vel_static = tolerance(actor_vel, 0., 0., 0.1)
     actor_vel_move = tolerance(actor_vel, 0.5, 1., 1.)
-    ball_vel_static = torch.where(dist<0.2, ball_vel_static, torch.zeros_like(ball_vel_static))
-    ball_vel_move = torch.where(dist<0.2, torch.ones_like(ball_vel_move), ball_vel_move)
-    actor_vel_static = torch.where(dist<0.2, torch.ones_like(actor_vel_static), torch.where(dist_b<0.2, actor_vel_static, torch.zeros_like(actor_vel_static)))
-    actor_vel_move = torch.where(dist<0.2, torch.ones_like(actor_vel_move), torch.where(dist_b<0.2, torch.ones_like(actor_vel_move), actor_vel_move))
-    reward = 0.1 * actor_vel_static + 0.1 * actor_vel_move + 0.4 * ball_vel_static + 0.4 * ball_vel_move
-    total_reward = (1 - energy_weight) * reward + energy_weight * energy_reward
+
+    # switch
+    if not additive:
+        ball_vel_reward = torch.where(dist<0.2, ball_vel_static, ball_vel_move)
+        actor_vel_reward = torch.where(dist<0.2, actor_vel_static, torch.where(dist_b<0.2, actor_vel_static, actor_vel_move))
+        task_complete_reward = torch.where(dist<0.2, torch.ones_like(actor_vel_reward), torch.zeros_like(actor_vel_reward))
+        total_reward = 0.3 * actor_vel_reward + 0.5 * ball_vel_reward + 0.2 * task_complete_reward
+    # add
+    else:
+        ball_vel_static = torch.where(dist<0.2, ball_vel_static, torch.zeros_like(ball_vel_static))
+        ball_vel_move = torch.where(dist<0.2, torch.ones_like(ball_vel_move), ball_vel_move)
+        actor_vel_static = torch.where(dist<0.2, torch.ones_like(actor_vel_static), torch.where(dist_b<0.2, actor_vel_static, torch.zeros_like(actor_vel_static)))
+        actor_vel_move = torch.where(dist<0.2, torch.ones_like(actor_vel_move), torch.where(dist_b<0.2, torch.ones_like(actor_vel_move), actor_vel_move))
+        reward = 0.1 * actor_vel_static + 0.1 * actor_vel_move + 0.4 * ball_vel_static + 0.4 * ball_vel_move
+        total_reward = (1 - energy_weight) * reward + energy_weight * energy_reward
 
     # Piecewise dist+vel reward
     # v1_char = (root_xy[:, 0] - prev_root_xy[:, 0]) / dt
