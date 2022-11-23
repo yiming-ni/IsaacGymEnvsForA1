@@ -164,24 +164,24 @@ task:
           soft_dof_torque_limit: 1
 
   domain_rand:
-    randomize_friction: True
+    randomize_friction: False
     friction_range: [0., 0.5]
-    randomize_joint_friction: True
+    randomize_joint_friction: False
     joint_friction_std: 0.01
-    randomize_base_mass: True
+    randomize_base_mass: False
     mass_ratio_range: 0.75
     inertia_ratio_range: 0.2
-    randomize_PD: True
-    push_robots: True
+    randomize_PD: False
+    push_robots: False
     push_interval_s: 0.2
     push_ball: False
 
   noise:
-    add_noise: True
+    add_noise: False
     add_delay: False
     noise_level: 1.0 # scales other values
     delay_bound: [0.0004, 0.025] #40
-    add_ball_delay: True
+    add_ball_delay: False
     noise_scales:
       base_quat: 0.01
       dof_pos: 0.01
