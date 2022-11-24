@@ -593,17 +593,11 @@ def compute_a1_reward(
     energy_sum = torch.sum(torch.square(torque * dof_vel), dim=1)
     energy_reward = torch.exp(- energy_scale * energy_sum)
 
-    root_rot = root_states[:, 3:7]
     v_char = torch.zeros_like(root_states[:, :3])
     v1_char = (root_xy[:, 0] - prev_root_xy[:, 0]) / dt
     v2_char = (root_xy[:, 1] - prev_root_xy[:, 1]) / dt
     v1_ball = (ball_xy[:, 0] - prev_ball_xy[:, 0]) / dt
     v2_ball = (ball_xy[:, 1] - prev_ball_xy[:, 1]) / dt
-
-    # v_char[:, 0], v_char[:, 1] = v1_char, v2_char
-
-    # heading_rot = calc_heading_quat_inv(root_rot)
-    # local_actor_vel = my_quat_rotate(heading_rot, v_char)
 
     diff_b = ball_xy - root_xy
     dist_b = diff_b[:, 0] ** 2 + diff_b[:, 1] ** 2
@@ -614,7 +608,6 @@ def compute_a1_reward(
     d = diff / torch.sqrt_(dist).reshape(-1, 1)
 
     ball_vel = d[:, 0] * v1_ball + d[:, 1] * v2_ball
-    # actor_vel = d_ball[:, 0] * local_actor_vel[:, 0] + d_ball[:, 1] * local_actor_vel[:, 1]
     actor_vel = d_ball[:, 0] * v1_char + d_ball[:, 1] * v2_char
 
     ball_vel_static = tolerance(ball_vel, 0., 0., 0.05)
