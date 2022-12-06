@@ -201,4 +201,5 @@ task:
   goal_reset_freq_inv: 4
   is_additive: True
   local_vel: False
+  randomize_goal: True
 

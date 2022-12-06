@@ -39,6 +39,7 @@ class A1Dribbling(A1AMP):
         self.ab_dist_threshold = self.cfg["task"]["reward"]["ab_dist_threshold"]
         self.piecewise = self.cfg["task"]["reward"]["piecewise"]
         self.goal_reset = self.cfg["task"]["goal_reset_freq_inv"]
+        self.rand_goal = self.cfg["task"]["randomize_goal"]
 
     def get_obs_size(self):
         obs_size = super().get_obs_size()
@@ -413,10 +414,11 @@ class A1Dribbling(A1AMP):
         # self.extras["success"] = self._success_buf
 
         # reset goal pos
-        goal_reset_envs = (self.goal_step >= self.goal_terminate).nonzero(as_tuple=False).flatten()
-        if len(goal_reset_envs) > 0:
-            # print('reset encountered!')
-            self._reset_goal_pos(goal_reset_envs, set_goal=True)
+        if self.rand_goal:
+            goal_reset_envs = (self.goal_step >= self.goal_terminate).nonzero(as_tuple=False).flatten()
+            if len(goal_reset_envs) > 0:
+                print('reset encountered!')
+                self._reset_goal_pos(goal_reset_envs, set_goal=True)
         return
 
     def _reset_ball_pos(self, env_ids):
