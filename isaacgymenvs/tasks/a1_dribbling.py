@@ -147,6 +147,28 @@ class A1Dribbling(A1AMP):
             goal_handle = self.gym.create_actor(env_ptr, goal_asset, goal_init_pos, "goal", i+self.num_envs, 1, 0)
             self.gym.set_rigid_body_color(env_ptr, goal_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
                                           gymapi.Vec3(1, 0, 0))
+            if self.limit_space:
+                bound_left_asset, bound_right_asset, bound_top_asset, bound_bottom_asset = marker_asset[2], marker_asset[3], marker_asset[4], marker_asset[5]
+                bound_left_pos, bound_right_pos, bound_top_pos, bound_bottom_pos = init_goal_pos[2], init_goal_pos[3], init_goal_pos[4], init_goal_pos[5]
+                bound_left_pos.p.x, bound_left_pos.p.y, bound_left_pos.p.z = self.space_length / 2, 0, 0.03
+                bound_right_pos.p.x, bound_right_pos.p.y, bound_right_pos.p.z = -self.space_length / 2, 0, 0.03
+                bound_top_pos.p.x, bound_top_pos.p.y, bound_top_pos.p.z = 0, self.space_width // 2, 0.03
+                bound_bottom_pos.p.x, bound_bottom_pos.p.y, bound_bottom_pos.p.z = 0, -self.space_width // 2, 0.03
+                bound_left_handle = self.gym.create_actor(env_ptr, bound_left_asset, bound_left_pos, "bound_left", i + self.num_envs, 1, 0)
+                bound_right_handle = self.gym.create_actor(env_ptr, bound_right_asset, bound_right_pos, "bound_right",
+                                                          i + self.num_envs, 1, 0)
+                bound_top_handle = self.gym.create_actor(env_ptr, bound_top_asset, bound_top_pos, "bound_top",
+                                                          i + self.num_envs, 1, 0)
+                bound_bottom_handle = self.gym.create_actor(env_ptr, bound_bottom_asset, bound_bottom_pos, "bound_bottom",
+                                                          i + self.num_envs, 1, 0)
+                self.gym.set_rigid_body_color(env_ptr, bound_left_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
+                                              gymapi.Vec3(1, 1, 1))
+                self.gym.set_rigid_body_color(env_ptr, bound_right_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
+                                              gymapi.Vec3(1, 1, 1))
+                self.gym.set_rigid_body_color(env_ptr, bound_top_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
+                                              gymapi.Vec3(1, 1, 1))
+                self.gym.set_rigid_body_color(env_ptr, bound_bottom_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
+                                              gymapi.Vec3(1, 1, 1))
         return
 
     def _create_marker_envs(self, asset_opts):
@@ -200,6 +222,16 @@ class A1Dribbling(A1AMP):
             self.num_markers += 1
             asset.append(goal_asset)
             pos.append(init_goal_pos)
+            if self.limit_space:
+
+                for i in range(4):
+                    bound_asset_opts = gymapi.AssetOptions()
+                    bound_asset_opts.fix_base_link = True
+                    bound_asset = self.gym.create_sphere(self.sim, 0.03, bound_asset_opts)
+                    asset.append(bound_asset)
+                    init_bound_pos = gymapi.Transform()
+                    pos.append(init_bound_pos)
+                    self.num_markers += 1
         return asset, pos
 
     def _set_env_state(self, env_ids, root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel):
@@ -479,22 +511,22 @@ class A1Dribbling(A1AMP):
     
     def _reset_limited_ball_pos(self, env_ids=None):
         if env_ids == None:
-            self.initial_ball_pos[..., 0] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_length - 0.7)
-            self.initial_ball_pos[..., 1] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_width - 0.7)
+            self.initial_ball_pos[..., 0] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_length / 2 - 0.7)
+            self.initial_ball_pos[..., 1] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_width / 2 - 0.7)
             self.initial_ball_pos[..., 2] = BALL_RAD
         else:
-            self.initial_ball_pos[env_ids, 0] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_length - 0.7)
-            self.initial_ball_pos[env_ids, 1] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_width - 0.7)
+            self.initial_ball_pos[env_ids, 0] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_length / 2 - 0.7)
+            self.initial_ball_pos[env_ids, 1] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_width / 2 - 0.7)
             self.initial_ball_pos[env_ids, 2] = BALL_RAD
         return
 
     def _reset_limited_goal_pos(self, env_ids=None):
         if env_ids == None:
-            self._goal_pos[..., 0] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_length - 0.7)
-            self._goal_pos[..., 1] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_width - 0.7)
+            self._goal_pos[..., 0] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_length / 2 - 0.7)
+            self._goal_pos[..., 1] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_width / 2 - 0.7)
         else:
-            self._goal_pos[env_ids, 0] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_length - 0.7)
-            self._goal_pos[env_ids, 1] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_width - 0.7)
+            self._goal_pos[env_ids, 0] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_length / 2 - 0.7)
+            self._goal_pos[env_ids, 1] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_width / 2 - 0.7)
         return
 
     def _compute_observations(self, env_ids=None):
@@ -757,10 +789,10 @@ def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rig
         limit /= 2
         limit -= 0.7
         out_of_space = (
-            (robot_xy[:, 0] >= limit[0]) | (robot_xy[:, 1] <= - limit[0]) |
-            (robot_xy[:, 1] >= limit[1]) | (robot_xy[:, 1] <= - limit[1]) |
-            (ball_pos[:, 0] >= limit[0]) | (ball_pos[:, 0] <= - limit[0]) |
-            (ball_pos[:, 1] >= limit[1]) | (ball_pos[:, 1] <= - limit[1])
+            (robot_xy[:, 0] > limit[0]) | (robot_xy[:, 1] < - limit[0]) |
+            (robot_xy[:, 1] > limit[1]) | (robot_xy[:, 1] < - limit[1]) |
+            (ball_pos[:, 0] > limit[0]) | (ball_pos[:, 0] < - limit[0]) |
+            (ball_pos[:, 1] > limit[1]) | (ball_pos[:, 1] < - limit[1])
             ) 
         fail = torch.where(out_of_space, torch.ones_like(reset_buf), fail)
 
