@@ -556,19 +556,12 @@ class A1Base(VecTask):
                 self.sim, lower, upper, num_per_row
             )
 
-            # pos = self.env_origins[i].clone()
-            # pos[:2] += torch_rand_float(-1., 1., (2, 1), device=self.device).squeeze(1)
-            # start_pose.p = gymapi.Vec3(*pos)
-
-            contact_filter = 0
-            handle = self.gym.create_actor(env_ptr, a1_asset, start_pose, "a1", i, contact_filter, 0)
-
-            # create markers
-            self._create_marker_actors(env_ptr, marker_asset, marker_pos, i)
-
-            # TODO below for computing torque limits
             rigid_shape_props = self._process_rigid_shape_props(rigid_shape_props_asset, i)  # friction
             self.gym.set_asset_rigid_shape_properties(a1_asset, rigid_shape_props)
+
+            handle = self.gym.create_actor(env_ptr, a1_asset, start_pose, "a1", i, 0, 0)
+            self._create_marker_actors(env_ptr, marker_asset, marker_pos, i)
+
             dof_props = self._process_dof_props(dof_props_asset, i)
             self.gym.set_actor_dof_properties(env_ptr, handle, dof_props)
             body_props = self.gym.get_actor_rigid_body_properties(env_ptr, handle)

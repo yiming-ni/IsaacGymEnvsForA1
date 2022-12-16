@@ -13,15 +13,21 @@ from .amp.utils_amp.motion_lib import A1MotionLib
 
 from isaacgym.torch_utils import *
 from isaacgymenvs.utils.torch_jit_utils import *
+import random
 
 ADDITIONAL_OBS_NUM = 3 + 6 + 3 + 3 + 2  # local pos, 6d rot, linear vel, angular vel of the ball, goal pos
 NUM_CURR_OBS = 18 + 3
 BALL_RAD = 0.1
 init_goal_dist = 7.0
+OBJECT = ['sphere', 'box']
 
 
 class A1Dribbling(A1AMP):
     def __init__(self, cfg, sim_device, graphics_device_id, headless):
+        self.obj = None
+        self.randomize_object = cfg['task']['randomize_obj']
+        if self.randomize_object:
+            self.size_range = cfg['task']['obj_size_range']
         self.limit_space = cfg['env']['plane']['limit_space']
         self.space_width, self.space_length = cfg['env']['plane']['width'], cfg['env']['plane']['length']
         super().__init__(cfg, sim_device, graphics_device_id, headless)
@@ -131,14 +137,28 @@ class A1Dribbling(A1AMP):
             self._goal_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers + 1, self.num_dof + 1)[..., 2, :]
         return
 
+    def process_ball_shape_props(self, props, i):
+        for p in range(len(props)):
+            if self.obj and self.obj == 'box':
+                props[p].friction = 0.5
+            else:
+                props[p].restitution = 1.0
+        return props
+
     def _create_marker_actors(self, env_ptr, marker_asset, init_goal_pos, i):
         ball_asset, ball_init_pos = marker_asset[0], init_goal_pos[0]
         ball_init_pos.p.x = self.initial_ball_pos[i, 0]
         ball_init_pos.p.y = self.initial_ball_pos[i, 1]
         ball_init_pos.p.z = self.initial_ball_pos[i, 2]
+
+        ball_shape_props = self.gym.get_asset_rigid_shape_properties(ball_asset)
+        ball_shape_props = self.process_ball_shape_props(ball_shape_props, i)
+        self.gym.set_asset_rigid_shape_properties(ball_asset, ball_shape_props)
+
         ball_handle = self.gym.create_actor(env_ptr, ball_asset, ball_init_pos, "ball", i, 0, 0)
-        # self.gym.set_rigid_body_color(env_ptr, ball_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
-        #                               gymapi.Vec3(1, 1, 0))
+        self.gym.set_rigid_body_color(env_ptr, ball_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
+                                      gymapi.Vec3(1, 1, 0))
+
         if not self.headless:
             goal_asset, goal_init_pos = marker_asset[1], init_goal_pos[1]
             goal_init_pos.p.x = self._goal_pos[i, 0]
@@ -193,14 +213,28 @@ class A1Dribbling(A1AMP):
         # self.initial_ball_pos[..., 5] = torch.flatten(torch.sqrt_(u) * torch.sin(w * torch.pi * 2))
         # self.initial_ball_pos[..., 6] = torch.flatten(torch.sqrt_(u) * torch.cos(w * torch.pi * 2))
 
-        if "asset" in self.cfg["env"]:
-            asset_file = self.cfg["env"]["asset"]["ballAsset"]
-        asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
-
         ball_asset_opts = gymapi.AssetOptions()
         ball_asset_opts.fix_base_link = False
         # ball_asset_opts.use_mesh_materials = True
-        ball_asset = self.gym.load_asset(self.sim, asset_root, asset_file, ball_asset_opts)
+
+        if self.randomize_object:
+            obj = OBJECT[random.randint(0, 1)]
+            self.obj = obj
+            if obj == 'box':
+                box_height = random.uniform(self.size_range[0], self.size_range[1])
+                box_width = random.uniform(self.size_range[0], self.size_range[1])
+                box_length = random.uniform(self.size_range[0], self.size_range[1])
+                ball_asset = self.gym.create_box(self.sim, box_length, box_width, box_height, ball_asset_opts)
+            else:
+                ball_asset_opts.angular_damping = random.uniform(1., 3.)
+                ball_asset_opts.linear_damping = 1.
+                ball_rad = box_height = random.uniform(self.size_range[0], self.size_range[1])
+                ball_asset = self.gym.create_sphere(self.sim, ball_rad, ball_asset_opts)
+        else:
+            if "asset" in self.cfg["env"]:
+                asset_file = self.cfg["env"]["asset"]["ballAsset"]
+            asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
+            ball_asset = self.gym.load_asset(self.sim, asset_root, asset_file, ball_asset_opts)
         init_ball_pos = gymapi.Transform()
         self.num_markers = 1
         asset.append(ball_asset)
