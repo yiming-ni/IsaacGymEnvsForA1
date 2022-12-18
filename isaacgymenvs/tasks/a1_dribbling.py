@@ -30,6 +30,7 @@ class A1Dribbling(A1AMP):
             self.size_range = cfg['task']['obj_size_range']
         self.limit_space = cfg['env']['plane']['limit_space']
         self.space_width, self.space_length = cfg['env']['plane']['width'], cfg['env']['plane']['length']
+        self.height = BALL_RAD
         super().__init__(cfg, sim_device, graphics_device_id, headless)
         # track goal progress
         self.goal_terminate = torch.randint(self.max_episode_length // 2, self.max_episode_length, (self.num_envs,), device=self.device, dtype=torch.int32)
@@ -203,7 +204,7 @@ class A1Dribbling(A1AMP):
             _ball_angle = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * torch.pi * 2
             self.initial_ball_pos[..., 0] = torch.flatten(_ball_dist * torch.cos(_ball_angle))
             self.initial_ball_pos[..., 1] = torch.flatten(_ball_dist * torch.sin(_ball_angle))
-            self.initial_ball_pos[..., 2] = BALL_RAD
+            self.initial_ball_pos[..., 2] = self.height
         # randomly sample quaternion
         # u = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
         # v = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
@@ -225,11 +226,14 @@ class A1Dribbling(A1AMP):
                 box_width = random.uniform(self.size_range[0], self.size_range[1])
                 box_length = random.uniform(self.size_range[0], self.size_range[1])
                 ball_asset = self.gym.create_box(self.sim, box_length, box_width, box_height, ball_asset_opts)
+                self.height = box_height + 1e-4
             else:
                 ball_asset_opts.angular_damping = random.uniform(1., 3.)
                 ball_asset_opts.linear_damping = 1.
-                ball_rad = box_height = random.uniform(self.size_range[0], self.size_range[1])
+                ball_rad = random.uniform(self.size_range[0], self.size_range[1])
                 ball_asset = self.gym.create_sphere(self.sim, ball_rad, ball_asset_opts)
+                self.height = ball_rad + 1e-4
+            self.initial_ball_pos[..., 2] = self.height
         else:
             if "asset" in self.cfg["env"]:
                 asset_file = self.cfg["env"]["asset"]["ballAsset"]
@@ -504,7 +508,7 @@ class A1Dribbling(A1AMP):
             ball_rot = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * torch.pi * 2
             self.initial_ball_pos[env_ids, 0] = torch.flatten(ball_dist * torch.cos(ball_rot)) + self._root_states[env_ids, 0]
             self.initial_ball_pos[env_ids, 1] = torch.flatten(ball_dist * torch.sin(ball_rot)) + self._root_states[env_ids, 1]
-            self.initial_ball_pos[env_ids, 2] = BALL_RAD
+            self.initial_ball_pos[env_ids, 2] = self.height
         # self.initial_ball_pos[env_ids, 0] = 2.4
         # self.initial_ball_pos[env_ids, 1] = 0.6
         # u = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device)
@@ -547,11 +551,11 @@ class A1Dribbling(A1AMP):
         if env_ids == None:
             self.initial_ball_pos[..., 0] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_length / 2 - 0.7)
             self.initial_ball_pos[..., 1] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_width / 2 - 0.7)
-            self.initial_ball_pos[..., 2] = BALL_RAD
+            self.initial_ball_pos[..., 2] = self.height
         else:
             self.initial_ball_pos[env_ids, 0] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_length / 2 - 0.7)
             self.initial_ball_pos[env_ids, 1] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_width / 2 - 0.7)
-            self.initial_ball_pos[env_ids, 2] = BALL_RAD
+            self.initial_ball_pos[env_ids, 2] = self.height
         return
 
     def _reset_limited_goal_pos(self, env_ids=None):
