@@ -95,3 +95,5 @@ params:
 
     task_reward_w: 0.5
     disc_reward_w: 0.5
+
+    reward_as_dict: True

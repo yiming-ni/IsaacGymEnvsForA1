@@ -31,6 +31,7 @@ class A1Dribbling(A1AMP):
         self.limit_space = cfg['env']['plane']['limit_space']
         self.space_width, self.space_length = cfg['env']['plane']['width'], cfg['env']['plane']['length']
         self.height = BALL_RAD
+        self.ball_rad = cfg['task']['ball_size']
         super().__init__(cfg, sim_device, graphics_device_id, headless)
         # track goal progress
         self.goal_terminate = torch.randint(self.max_episode_length // 2, self.max_episode_length, (self.num_envs,), device=self.device, dtype=torch.int32)
@@ -219,7 +220,8 @@ class A1Dribbling(A1AMP):
         # ball_asset_opts.use_mesh_materials = True
 
         if self.randomize_object:
-            obj = OBJECT[random.randint(0, 1)]
+            # obj = OBJECT[random.randint(0, 1)]
+            obj = 'sphere'
             self.obj = obj
             if obj == 'box':
                 box_height = random.uniform(self.size_range[0], self.size_range[1])
@@ -235,10 +237,14 @@ class A1Dribbling(A1AMP):
                 self.height = ball_rad + 1e-4
             self.initial_ball_pos[..., 2] = self.height
         else:
-            if "asset" in self.cfg["env"]:
-                asset_file = self.cfg["env"]["asset"]["ballAsset"]
-            asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
-            ball_asset = self.gym.load_asset(self.sim, asset_root, asset_file, ball_asset_opts)
+            # if "asset" in self.cfg["env"]:
+            #     asset_file = self.cfg["env"]["asset"]["ballAsset"]
+            # asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
+            # ball_asset = self.gym.load_asset(self.sim, asset_root, asset_file, ball_asset_opts)
+            ball_asset_opts.angular_damping = 1.
+            ball_asset_opts.linear_damping = 1.
+            ball_asset = self.gym.create_sphere(self.sim, self.ball_rad, ball_asset_opts)
+            self.height = self.ball_rad + 1e-4
         init_ball_pos = gymapi.Transform()
         self.num_markers = 1
         asset.append(ball_asset)
@@ -332,7 +338,7 @@ class A1Dribbling(A1AMP):
 
     def _compute_reward(self, actions):
         is_additive = self.cfg['task']['is_additive']
-        self.rew_buf[:] = compute_a1_reward(self._root_states,
+        rew_dict = compute_a1_reward(self._root_states,
                                             self._prev_root_states[:, :2],
                                             self._goal_pos,
                                             self._ball_root_states[:, :2],
@@ -348,7 +354,8 @@ class A1Dribbling(A1AMP):
                                             self.piecewise,
                                             is_additive,
                                             )
-        return
+        self.rew_buf[:] = rew_dict["total_rew"]
+        return rew_dict
 
     def _compute_observations(self, env_ids=None):
         super()._compute_observations(env_ids)
@@ -484,7 +491,7 @@ class A1Dribbling(A1AMP):
         self._prev_ball_states[:] = self._ball_root_states[:]
         self._ball_hist[:, 0, :] = self._prev_ball_states[:, :3]
         self._ball_hist[:, 1, :] = self._ball_root_states[:, :3]
-        super().post_physics_step()
+        rew_dict = super().post_physics_step()
         self._pos_hist[:, 2, :] = self._root_states[:, :3]
         self._ball_hist[:, 2, :] = self._ball_root_states[:, :3]
         # states_idx = NUM_CURR_OBS * (self.history_steps + 1)
@@ -498,7 +505,7 @@ class A1Dribbling(A1AMP):
             if len(goal_reset_envs) > 0:
                 # print('reset encountered!')
                 self._reset_goal_pos(goal_reset_envs, set_goal=True)
-        return
+        return rew_dict
 
     def _reset_ball_pos(self, env_ids):
         if self.limit_space:
@@ -693,7 +700,7 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
 def compute_a1_reward(
     root_states, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt, torque, 
     dof_vel, actor_vel_scale, ball_vel_scale, energy_scale, energy_weight, ab_dist_threshold, piecewise, additive):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, Tensor, Tensor, float, float, float, float, float, bool, bool) -> Tensor
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, Tensor, Tensor, float, float, float, float, float, bool, bool) -> Dict[str, Tensor]
     
     root_xy = root_states[:, :2]
     # energy saving reward
@@ -779,7 +786,16 @@ def compute_a1_reward(
     # print('total_rew: {}, rew:{}, dist_rew:{}, actor_dist_rew:{}, energy:{}, actor_vel:{}, ball_vel:{}'.format(
     #     total_reward, reward, dist_reward, dist_b_reward, energy_reward, actor_vel_reward, ball_vel_reward))
 
-    return total_reward
+    rewards = {
+        "actor_static_rew": actor_vel_static,
+        "actor_move_rew": actor_vel_move,
+        "ball_static_rew": ball_vel_static,
+        "ball_move_rew": ball_vel_move,
+        "total_rew": total_reward,
+        "energy_rew": energy_reward
+    }
+
+    return rewards
 
 
 @torch.jit.script

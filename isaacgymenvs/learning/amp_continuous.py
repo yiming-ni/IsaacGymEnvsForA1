@@ -46,6 +46,15 @@ import learning.common_agent as common_agent
 
 from tensorboardX import SummaryWriter
 
+REWARD_TERMS = [
+    "actor_static_rew",
+    "actor_move_rew",
+    "ball_static_rew",
+    "ball_move_rew",
+    "total_rew",
+    "energy_rew"
+    ]
+
 
 class AMPAgent(common_agent.CommonAgent):
     def __init__(self, base_name, config):
@@ -152,6 +161,12 @@ class AMPAgent(common_agent.CommonAgent):
 
             self.current_rewards = self.current_rewards * not_dones.unsqueeze(1)
             self.current_lengths = self.current_lengths * not_dones
+
+            if self.reward_as_dict:
+                for x in REWARD_TERMS:
+                    self.current_reward_dict[x] += infos[x].unsqueeze(1)
+                    self.game_rewards_dict[x].update(self.current_reward_dict[x][done_indices])
+                    self.current_reward_dict[x] = self.current_reward_dict[x] * not_dones.unsqueeze(1)
         
             if (self.vec_env.env.viewer and (n == (self.horizon_length - 1))):
                 self._amp_debug(infos)

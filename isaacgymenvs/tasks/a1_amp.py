@@ -65,7 +65,7 @@ class A1AMP(A1Base):
         return
 
     def post_physics_step(self):
-        super().post_physics_step()
+        rew_dict = super().post_physics_step()
         
         self._update_hist_amp_obs()
         self._compute_amp_observations()
@@ -73,7 +73,7 @@ class A1AMP(A1Base):
         amp_obs_flat = self._amp_obs_buf.view(-1, self.get_num_amp_obs())
         self.extras["amp_obs"] = amp_obs_flat
 
-        return
+        return rew_dict
 
     def get_num_amp_obs(self):
         return self.num_amp_obs

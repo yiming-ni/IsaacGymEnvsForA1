@@ -874,7 +874,7 @@ class A1Base(VecTask):
                                        torch.ones_like(self.timeout_buf), torch.zeros_like(self.timeout_buf))
 
         # compute observations, rewards, resets, ...
-        self.post_physics_step()
+        rew_dict = self.post_physics_step()
 
         # randomize observations
         if self.dr_randomizations.get('observations', None):
@@ -890,6 +890,8 @@ class A1Base(VecTask):
 
         if self.num_states > 0:
             self.obs_dict["states"] = self.get_state()
+        
+        self.extras.update(rew_dict)
 
         return self.obs_dict, self.rew_buf.to(self.rl_device), self.reset_buf.to(self.rl_device), self.extras
 
@@ -915,7 +917,7 @@ class A1Base(VecTask):
         if self.dr_push_robot:
             self._push_robots()
         self._compute_observations()
-        self._compute_reward(self.actions)
+        rew_dict = self._compute_reward(self.actions)
         self._compute_reset()
 
         self.extras["terminate"] = self._terminate_buf
@@ -924,7 +926,7 @@ class A1Base(VecTask):
         if self.viewer and self.debug_viz:
             self._update_debug_viz()
 
-        return
+        return rew_dict
 
     def _push_robots(self):
         """ Randomly pushes the robots. Emulates an impulse by setting a randomized base velocity.
