@@ -582,13 +582,6 @@ class A1Dribbling(A1AMP):
             self._goal_xy[env_ids] += torch.rand_like(self._goal_xy[env_ids]) * 0.05
 
     def _compute_reset(self):
-        # self.reset_buf[:], self._terminate_buf[:], self._success_buf[:] = compute_a1_reset(self.reset_buf, self.progress_buf,
-        #                                                              self._contact_forces, self._contact_body_ids,
-        #                                                              self._rigid_body_pos, self.max_episode_length,
-        #                                                              self._enable_early_termination,
-        #                                                              self._termination_height,
-        #                                                              self._goal_pos[:, :2], self._ball_root_states[:, :3], init_goal_dist, 
-        #                                                              self._pos_hist)
         self.reset_buf[:], self._terminate_buf[:] = compute_a1_reset(self.reset_buf, self.progress_buf,
                                                                      self._contact_forces, self._contact_body_ids,
                                                                      self._rigid_body_pos, self.max_episode_length,
@@ -729,54 +722,51 @@ def compute_a1_reward(
     actor_vel_static = tolerance(actor_vel, 0., 0., 0.1)
     actor_vel_move = tolerance(actor_vel, 0.5, 1., 1.)
 
-    # switch
-    if not additive:
-        ball_vel_reward = torch.where(dist<0.2, ball_vel_static, ball_vel_move)
-        actor_vel_reward = torch.where(dist<0.2, actor_vel_static, torch.where(dist_b<0.2, actor_vel_static, actor_vel_move))
-        task_complete_reward = torch.where(dist<0.2, torch.ones_like(actor_vel_reward), torch.zeros_like(actor_vel_reward))
-        total_reward = 0.3 * actor_vel_reward + 0.5 * ball_vel_reward + 0.2 * task_complete_reward
-    # add
-    else:
+    if additive:
         ball_vel_static = torch.where(dist<0.2, ball_vel_static, torch.zeros_like(ball_vel_static))
         ball_vel_move = torch.where(dist<0.2, torch.ones_like(ball_vel_move), ball_vel_move)
         actor_vel_static = torch.where(dist<0.2, torch.ones_like(actor_vel_static), torch.where(dist_b<0.2, actor_vel_static, torch.zeros_like(actor_vel_static)))
         actor_vel_move = torch.where(dist<0.2, torch.ones_like(actor_vel_move), torch.where(dist_b<0.2, torch.ones_like(actor_vel_move), actor_vel_move))
         reward = 0.1 * actor_vel_static + 0.1 * actor_vel_move + 0.4 * ball_vel_static + 0.4 * ball_vel_move
         total_reward = (1 - energy_weight) * reward + energy_weight * energy_reward
+        rewards = {
+        "actor_dist/static_rew": actor_vel_static,
+        "actor_move_rew": actor_vel_move,
+        "ball_dist/static_rew": ball_vel_static,
+        "ball_move_rew": ball_vel_move,
+        "total_rew": total_reward,
+        "energy_rew": energy_reward
+        }
 
-    # Piecewise dist+vel reward
-    # v1_char = (root_xy[:, 0] - prev_root_xy[:, 0]) / dt
-    # v2_char = (root_xy[:, 1] - prev_root_xy[:, 1]) / dt
-    # v1_ball = (ball_xy[:, 0] - prev_ball_xy[:, 0]) / dt
-    # v2_ball = (ball_xy[:, 1] - prev_ball_xy[:, 1]) / dt
-    # diff_b = ball_xy - root_xy
-    # dist_b = diff_b[:, 0] ** 2 + diff_b[:, 1] ** 2
-    # dist_b_reward = torch.exp(- dist_b * 0.5)
+    else:
+        # using distance and velocity reward
+        actor_dist_reward = torch.exp(- dist_b ** 2 * 0.5)
 
-    # d_ball = diff_b / torch.sqrt_(dist_b).reshape(-1, 1)
-    # actor_vel_reward = torch.exp(
-    #     - actor_vel_scale * torch.maximum(torch.zeros_like(v1_char),
-    #                     0.5 - (d_ball[:, 0] * v1_char + d_ball[:, 1] * v2_char)) ** 2) #2
+        actor_vel_reward = torch.exp(
+            - actor_vel_scale * torch.maximum(torch.zeros_like(v1_char),
+                            0.5 - actor_vel) ** 2)
 
-    # x_diff = goal_xy[:, 0] - ball_xy[:, 0]
-    # y_diff = goal_xy[:, 1] - ball_xy[:, 1]
-    # dist = x_diff * x_diff + y_diff * y_diff
-    # dist_reward = torch.exp(- dist * 0.5)
+        dist_reward = torch.exp(- dist ** 2 * 0.5)
 
-    # d_len = torch.sqrt_(dist)
-    # d1 = x_diff / d_len
-    # d2 = y_diff / d_len
-    # ball_vel_reward = torch.exp(
-    #     - ball_vel_scale * torch.maximum(torch.zeros_like(v1_ball),
-    #                     0.5 - (d1 * v1_ball + d2 * v2_ball)) ** 2)
-    # ball_vel_reward = torch.where(dist > 0.2, ball_vel_reward, torch.ones_like(ball_vel_reward))
+        ball_vel_reward = torch.exp(
+            - ball_vel_scale * torch.maximum(torch.zeros_like(v1_ball),
+                            0.5 - ball_vel) ** 2)
 
-    # if piecewise:
-    #     far_reward = 0.5 * actor_vel_reward + 0.5 * dist_b_reward
-    #     near_reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
-    #     reward = torch.where(dist_b > ab_dist_threshold, far_reward, near_reward)
-    # else:
-    #     reward = 0.1 * actor_vel_reward + 0.1 * dist_b_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
+        if piecewise:
+            ball_vel_reward = torch.where(dist_b > ab_dist_threshold, torch.zeros_like(ball_vel_reward), ball_vel_reward)
+            dist_reward = torch.where(dist_b > ab_dist_threshold, torch.zeros_like(dist_reward), dist_reward)
+
+        reward = 0.1 * actor_vel_reward + 0.1 * actor_dist_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
+        total_reward = (1 - energy_weight) * reward + energy_weight * energy_reward
+        total_reward = torch.where(dist < 0.2, torch.ones_like(total_reward), total_reward)
+        rewards = {
+        "actor_dist/static_rew": actor_dist_reward,
+        "actor_move_rew": actor_vel_reward,
+        "ball_dist/static_rew": dist_reward,
+        "ball_move_rew": ball_vel_reward,
+        "total_rew": total_reward,
+        "energy_rew": energy_reward
+        }
 
     # # override the reward to be the max if ball is close enough to ball
     # reward = torch.where(dist < 0.2, torch.ones_like(reward), reward)
@@ -784,16 +774,9 @@ def compute_a1_reward(
 
     # test printouts
     # print('total_rew: {}, rew:{}, dist_rew:{}, actor_dist_rew:{}, energy:{}, actor_vel:{}, ball_vel:{}'.format(
-    #     total_reward, reward, dist_reward, dist_b_reward, energy_reward, actor_vel_reward, ball_vel_reward))
+    #     total_reward, reward, dist_reward, actor_dist_reward, energy_reward, actor_vel_reward, ball_vel_reward))
 
-    rewards = {
-        "actor_static_rew": actor_vel_static,
-        "actor_move_rew": actor_vel_move,
-        "ball_static_rew": ball_vel_static,
-        "ball_move_rew": ball_vel_move,
-        "total_rew": total_reward,
-        "energy_rew": energy_reward
-    }
+
 
     return rewards
 

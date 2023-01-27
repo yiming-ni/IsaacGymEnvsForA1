@@ -51,9 +51,9 @@ import isaacgymenvs.learning.amp_datasets as amp_datasets
 from tensorboardX import SummaryWriter
 
 REWARD_TERMS = [
-    "actor_static_rew",
+    "actor_dist/static_rew",
     "actor_move_rew",
-    "ball_static_rew",
+    "ball_dist/static_rew",
     "ball_move_rew",
     "total_rew",
     "energy_rew"
