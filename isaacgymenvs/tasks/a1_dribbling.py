@@ -141,14 +141,14 @@ class A1Dribbling(A1AMP):
 
     def process_ball_shape_props(self, props, i):
         for p in range(len(props)):
-            if self.obj and self.obj == 'box':
-                props[p].friction = 0.5
-            else:
-                props[p].restitution = 1.0
+            props[p].restitution = 1.0
         return props
 
     def _create_marker_actors(self, env_ptr, marker_asset, init_goal_pos, i):
-        ball_asset, ball_init_pos = marker_asset[0], init_goal_pos[0]
+        if self.randomize_object:
+            ball_asset, ball_init_pos = marker_asset[i], init_goal_pos[0]
+        else:
+            ball_asset, ball_init_pos = marker_asset[0], init_goal_pos[0]
         ball_init_pos.p.x = self.initial_ball_pos[i, 0]
         ball_init_pos.p.y = self.initial_ball_pos[i, 1]
         ball_init_pos.p.z = self.initial_ball_pos[i, 2]
@@ -162,27 +162,27 @@ class A1Dribbling(A1AMP):
                                       gymapi.Vec3(1, 1, 0))
 
         if not self.headless:
-            goal_asset, goal_init_pos = marker_asset[1], init_goal_pos[1]
-            goal_init_pos.p.x = self._goal_pos[i, 0]
-            goal_init_pos.p.y = self._goal_pos[i, 1]
-            goal_init_pos.p.z = 0.2
-            goal_handle = self.gym.create_actor(env_ptr, goal_asset, goal_init_pos, "goal", i+self.num_envs, 1, 0)
-            self.gym.set_rigid_body_color(env_ptr, goal_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
-                                          gymapi.Vec3(1, 0, 0))
-            if self.limit_space:
-                bound_left_asset, bound_right_asset, bound_top_asset, bound_bottom_asset = marker_asset[2], marker_asset[3], marker_asset[4], marker_asset[5]
-                bound_left_pos, bound_right_pos, bound_top_pos, bound_bottom_pos = init_goal_pos[2], init_goal_pos[3], init_goal_pos[4], init_goal_pos[5]
+            if not self.limit_space:
+                goal_asset, goal_init_pos = marker_asset[-1], init_goal_pos[1]
+            else:
+                goal_asset, goal_init_pos = marker_asset[-5], init_goal_pos[1]
+                bound_left_asset, bound_right_asset, bound_top_asset, bound_bottom_asset = marker_asset[-4], \
+                marker_asset[-3], marker_asset[-2], marker_asset[-1]
+                bound_left_pos, bound_right_pos, bound_top_pos, bound_bottom_pos = init_goal_pos[2], init_goal_pos[3], \
+                init_goal_pos[4], init_goal_pos[5]
                 bound_left_pos.p.x, bound_left_pos.p.y, bound_left_pos.p.z = self.space_length / 2, 0, 0.03
                 bound_right_pos.p.x, bound_right_pos.p.y, bound_right_pos.p.z = -self.space_length / 2, 0, 0.03
                 bound_top_pos.p.x, bound_top_pos.p.y, bound_top_pos.p.z = 0, self.space_width // 2, 0.03
                 bound_bottom_pos.p.x, bound_bottom_pos.p.y, bound_bottom_pos.p.z = 0, -self.space_width // 2, 0.03
-                bound_left_handle = self.gym.create_actor(env_ptr, bound_left_asset, bound_left_pos, "bound_left", i + self.num_envs, 1, 0)
+                bound_left_handle = self.gym.create_actor(env_ptr, bound_left_asset, bound_left_pos, "bound_left",
+                                                          i + self.num_envs, 1, 0)
                 bound_right_handle = self.gym.create_actor(env_ptr, bound_right_asset, bound_right_pos, "bound_right",
-                                                          i + self.num_envs, 1, 0)
+                                                           i + self.num_envs, 1, 0)
                 bound_top_handle = self.gym.create_actor(env_ptr, bound_top_asset, bound_top_pos, "bound_top",
-                                                          i + self.num_envs, 1, 0)
-                bound_bottom_handle = self.gym.create_actor(env_ptr, bound_bottom_asset, bound_bottom_pos, "bound_bottom",
-                                                          i + self.num_envs, 1, 0)
+                                                         i + self.num_envs, 1, 0)
+                bound_bottom_handle = self.gym.create_actor(env_ptr, bound_bottom_asset, bound_bottom_pos,
+                                                            "bound_bottom",
+                                                            i + self.num_envs, 1, 0)
                 self.gym.set_rigid_body_color(env_ptr, bound_left_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
                                               gymapi.Vec3(1, 1, 1))
                 self.gym.set_rigid_body_color(env_ptr, bound_right_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
@@ -191,6 +191,13 @@ class A1Dribbling(A1AMP):
                                               gymapi.Vec3(1, 1, 1))
                 self.gym.set_rigid_body_color(env_ptr, bound_bottom_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
                                               gymapi.Vec3(1, 1, 1))
+            goal_init_pos.p.x = self._goal_pos[i, 0]
+            goal_init_pos.p.y = self._goal_pos[i, 1]
+            goal_init_pos.p.z = 0.2
+            goal_handle = self.gym.create_actor(env_ptr, goal_asset, goal_init_pos, "goal", i+self.num_envs, 1, 0)
+            self.gym.set_rigid_body_color(env_ptr, goal_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
+                                          gymapi.Vec3(1, 0, 0))
+
         return
 
     def _create_marker_envs(self, asset_opts):
@@ -206,35 +213,21 @@ class A1Dribbling(A1AMP):
             self.initial_ball_pos[..., 0] = torch.flatten(_ball_dist * torch.cos(_ball_angle))
             self.initial_ball_pos[..., 1] = torch.flatten(_ball_dist * torch.sin(_ball_angle))
             self.initial_ball_pos[..., 2] = self.height
-        # randomly sample quaternion
-        # u = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
-        # v = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
-        # w = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device)
-        # self.initial_ball_pos[..., 3] = torch.flatten(torch.sqrt_(1. - u) * torch.sin(v * torch.pi * 2))
-        # self.initial_ball_pos[..., 4] = torch.flatten(torch.sqrt_(1. - u) * torch.cos(v * torch.pi * 2))
-        # self.initial_ball_pos[..., 5] = torch.flatten(torch.sqrt_(u) * torch.sin(w * torch.pi * 2))
-        # self.initial_ball_pos[..., 6] = torch.flatten(torch.sqrt_(u) * torch.cos(w * torch.pi * 2))
 
         ball_asset_opts = gymapi.AssetOptions()
         ball_asset_opts.fix_base_link = False
         # ball_asset_opts.use_mesh_materials = True
 
         if self.randomize_object:
-            # obj = OBJECT[random.randint(0, 1)]
-            obj = 'sphere'
-            self.obj = obj
-            if obj == 'box':
-                box_height = random.uniform(self.size_range[0], self.size_range[1])
-                box_width = random.uniform(self.size_range[0], self.size_range[1])
-                box_length = random.uniform(self.size_range[0], self.size_range[1])
-                ball_asset = self.gym.create_box(self.sim, box_length, box_width, box_height, ball_asset_opts)
-                self.height = box_height + 1e-4
-            else:
+            for i in range(self.num_envs):
+
                 ball_asset_opts.angular_damping = random.uniform(1., 3.)
                 ball_asset_opts.linear_damping = 1.
+                ball_asset_opts.density = 1.
                 ball_rad = random.uniform(self.size_range[0], self.size_range[1])
                 ball_asset = self.gym.create_sphere(self.sim, ball_rad, ball_asset_opts)
                 self.height = ball_rad + 1e-4
+                asset.append(ball_asset)
             self.initial_ball_pos[..., 2] = self.height
         else:
             # if "asset" in self.cfg["env"]:
@@ -245,9 +238,10 @@ class A1Dribbling(A1AMP):
             ball_asset_opts.linear_damping = 1.
             ball_asset = self.gym.create_sphere(self.sim, self.ball_rad, ball_asset_opts)
             self.height = self.ball_rad + 1e-4
+            asset.append(ball_asset)
         init_ball_pos = gymapi.Transform()
         self.num_markers = 1
-        asset.append(ball_asset)
+
         pos.append(init_ball_pos)
         # create goal pos near the ball
         self._goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
