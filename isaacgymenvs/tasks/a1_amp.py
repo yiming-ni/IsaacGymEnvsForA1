@@ -166,6 +166,16 @@ class A1AMP(A1Base):
         self.reset_buf[env_ids] = 0
         self._terminate_buf[env_ids] = 0
 
+        # initial_force = torch.zeros((self.num_envs, self.num_dof), device=self.device)
+        # self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(initial_force))
+        # forces = torch.zeros((self.num_envs, self._all_actor_rb_states.shape[1], 3), device=self.device,
+        #                      dtype=torch.float)
+        # torques = torch.zeros((self.num_envs, self._all_actor_rb_states.shape[1], 3), device=self.device,
+        #                       dtype=torch.float)
+        # self.gym.apply_rigid_body_force_tensors(self.sim, gymtorch.unwrap_tensor(forces),
+        #                                         gymtorch.unwrap_tensor(torques), gymapi.GLOBAL_SPACE)
+
+
         return
     
     def _reset_default(self, env_ids):

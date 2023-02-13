@@ -13,7 +13,7 @@ from .amp.utils_amp.motion_lib import A1MotionLib
 
 from isaacgym.torch_utils import *
 from isaacgymenvs.utils.torch_jit_utils import *
-import random
+import numpy as np
 
 ADDITIONAL_OBS_NUM = 3 + 6 + 3 + 3 + 2  # local pos, 6d rot, linear vel, angular vel of the ball, goal pos
 NUM_CURR_OBS = 18 + 3
@@ -28,6 +28,7 @@ class A1Dribbling(A1AMP):
         self.randomize_object = cfg['task']['randomize_obj']
         if self.randomize_object:
             self.size_range = cfg['task']['obj_size_range']
+            self.density_range = cfg['task']['obj_density_range']
         self.limit_space = cfg['env']['plane']['limit_space']
         self.space_width, self.space_length = cfg['env']['plane']['width'], cfg['env']['plane']['length']
         self.height = BALL_RAD
@@ -216,15 +217,16 @@ class A1Dribbling(A1AMP):
 
         ball_asset_opts = gymapi.AssetOptions()
         ball_asset_opts.fix_base_link = False
+        ball_asset_opts.override_inertia = True
         # ball_asset_opts.use_mesh_materials = True
 
         if self.randomize_object:
             for i in range(self.num_envs):
 
-                ball_asset_opts.angular_damping = random.uniform(1., 3.)
-                ball_asset_opts.linear_damping = 1.
-                ball_asset_opts.density = 1.
-                ball_rad = random.uniform(self.size_range[0], self.size_range[1])
+                ball_asset_opts.angular_damping = np.random.uniform(0.5, 3.)
+                ball_asset_opts.linear_damping = np.random.uniform(0.5, 3.)
+                ball_asset_opts.density = np.random.uniform(self.density_range[0], self.density_range[1])
+                ball_rad = np.random.uniform(self.size_range[0], self.size_range[1])
                 ball_asset = self.gym.create_sphere(self.sim, ball_rad, ball_asset_opts)
                 self.height = ball_rad + 1e-4
                 asset.append(ball_asset)

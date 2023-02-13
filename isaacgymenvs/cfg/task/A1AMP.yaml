@@ -206,5 +206,6 @@ task:
   randomize_goal: True
   randomize_obj: false
   obj_size_range: [0.07, 0.15]
+  obj_density_range: [80, 200]
   ball_size: 0.1
 
