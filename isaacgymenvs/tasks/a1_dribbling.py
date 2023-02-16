@@ -232,14 +232,14 @@ class A1Dribbling(A1AMP):
                 asset.append(ball_asset)
             self.initial_ball_pos[..., 2] = self.height
         else:
-            # if "asset" in self.cfg["env"]:
-            #     asset_file = self.cfg["env"]["asset"]["ballAsset"]
-            # asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
-            # ball_asset = self.gym.load_asset(self.sim, asset_root, asset_file, ball_asset_opts)
-            ball_asset_opts.angular_damping = 1.
-            ball_asset_opts.linear_damping = 1.
-            ball_asset = self.gym.create_sphere(self.sim, self.ball_rad, ball_asset_opts)
-            self.height = self.ball_rad + 1e-4
+            if "asset" in self.cfg["env"]:
+                asset_file = self.cfg["env"]["asset"]["ballAsset"]
+            asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
+            ball_asset = self.gym.load_asset(self.sim, asset_root, asset_file, ball_asset_opts)
+            # ball_asset_opts.angular_damping = 1.
+            # ball_asset_opts.linear_damping = 1.
+            # ball_asset = self.gym.create_sphere(self.sim, self.ball_rad, ball_asset_opts)
+            # self.height = self.ball_rad + 1e-4
             asset.append(ball_asset)
         init_ball_pos = gymapi.Transform()
         self.num_markers = 1
