@@ -50,6 +50,7 @@ class A1Dribbling(A1AMP):
         self.ab_dist_threshold = self.cfg["task"]["reward"]["ab_dist_threshold"]
         self.piecewise = self.cfg["task"]["reward"]["piecewise"]
         self.goal_reset = self.cfg["task"]["goal_reset_freq_inv"]
+        self.goal_reset_upper_inv = self.cfg["task"]["goal_reset_freq_inv_upper"]
         self.rand_goal = self.cfg["task"]["randomize_goal"]
 
     def get_obs_size(self):
@@ -529,7 +530,7 @@ class A1Dribbling(A1AMP):
 
     def _reset_goal_pos(self, goal_reset_envs, set_goal=False):
 
-        self.goal_terminate[goal_reset_envs] = torch.randint(self.max_episode_length//self.goal_reset, self.max_episode_length//2, (len(goal_reset_envs),), device=self.device,
+        self.goal_terminate[goal_reset_envs] = torch.randint(int(self.max_episode_length//self.goal_reset), int(self.max_episode_length//self.goal_reset_upper_inv), (len(goal_reset_envs),), device=self.device,
                                                                 dtype=torch.int32)
         self.goal_step[goal_reset_envs] = 0
         if self.limit_space:
