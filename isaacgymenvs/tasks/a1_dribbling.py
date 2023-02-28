@@ -221,13 +221,17 @@ class A1Dribbling(A1AMP):
         # ball_asset_opts.use_mesh_materials = True
 
         if self.randomize_object:
+            asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'base/soccerball_urdfs')
+            object_assets = os.listdir(asset_root)
             for i in range(self.num_envs):
-
-                ball_asset_opts.angular_damping = np.random.uniform(0.5, 3.)
-                ball_asset_opts.linear_damping = np.random.uniform(0.5, 3.)
-                ball_asset_opts.density = np.random.uniform(self.density_range[0], self.density_range[1])
-                ball_rad = np.random.uniform(self.size_range[0], self.size_range[1])
-                ball_asset = self.gym.create_sphere(self.sim, ball_rad, ball_asset_opts)
+                asset_file = object_assets[i]
+                ball_rad = float(asset_file[0] + '.' + asset_file[1:5])
+                ball_asset = self.gym.load_asset(self.sim, asset_root, asset_file, ball_asset_opts)
+                # ball_asset_opts.angular_damping = np.random.uniform(0.5, 3.)
+                # ball_asset_opts.linear_damping = np.random.uniform(0.5, 3.)
+                # ball_asset_opts.density = np.random.uniform(self.density_range[0], self.density_range[1])
+                # ball_rad = np.random.uniform(self.size_range[0], self.size_range[1])
+                # ball_asset = self.gym.create_sphere(self.sim, ball_rad, ball_asset_opts)
                 self.height = ball_rad + 1e-4
                 asset.append(ball_asset)
             self.initial_ball_pos[..., 2] = self.height
