@@ -152,17 +152,10 @@ class A1Dribbling(A1AMP):
             inertia_ratio = self.domain_rand["inertia_ratio_range"]
             for k in range(len(props)):
                 props[k].mass *= np.random.uniform(1 - mass_ratio, 1 + mass_ratio)
-                if k != 0:
-                    props[k].com.x += np.random.uniform(-0.05, 0.05)
-                    props[k].com.y += np.random.uniform(-0.05, 0.05)
-                    props[k].com.z += np.random.uniform(-0.05, 0.05)
                 props[k].inertia.x *= np.random.uniform(1 - inertia_ratio, 1 + inertia_ratio)
                 props[k].inertia.y *= np.random.uniform(1 - inertia_ratio, 1 + inertia_ratio)
                 props[k].inertia.z *= np.random.uniform(1 - inertia_ratio, 1 + inertia_ratio)
 
-            props[0].com.x += np.random.uniform(-0.1, 0.1)
-            props[0].com.y += np.random.uniform(-0.1, 0.1)
-            props[0].com.z += np.random.uniform(-0.1, 0.1)
         return props
 
     def _create_marker_actors(self, env_ptr, marker_asset, init_goal_pos, i):
