@@ -250,7 +250,7 @@ class A1Dribbling(A1AMP):
                 # ball_asset = self.gym.create_sphere(self.sim, ball_rad, ball_asset_opts)
                 self.height = ball_rad + 1e-4
                 asset.append(ball_asset)
-            self.initial_ball_pos[..., 2] = self.height
+                self.initial_ball_pos[i, 2] = self.height
         else:
             if "asset" in self.cfg["env"]:
                 asset_file = self.cfg["env"]["asset"]["ballAsset"]
