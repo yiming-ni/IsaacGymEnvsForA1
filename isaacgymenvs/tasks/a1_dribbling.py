@@ -141,10 +141,10 @@ class A1Dribbling(A1AMP):
             self._goal_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers + 1, self.num_dof + 1)[..., 2, :]
         return
 
-    def process_ball_shape_props(self, props, i):
-        for p in range(len(props)):
-            props[p].restitution = 1.0
-        return props
+    # def process_ball_shape_props(self, props, i):
+    #     for p in range(len(props)):
+    #         props[p].restitution = 1.0
+    #     return props
 
     def _process_ball_body_props(self, props, i):
         if self.randomize_object:
@@ -167,9 +167,9 @@ class A1Dribbling(A1AMP):
         ball_init_pos.p.y = self.initial_ball_pos[i, 1]
         ball_init_pos.p.z = self.initial_ball_pos[i, 2]
 
-        ball_shape_props = self.gym.get_asset_rigid_shape_properties(ball_asset)
-        ball_shape_props = self.process_ball_shape_props(ball_shape_props, i)
-        self.gym.set_asset_rigid_shape_properties(ball_asset, ball_shape_props)
+        # ball_shape_props = self.gym.get_asset_rigid_shape_properties(ball_asset)
+        # ball_shape_props = self.process_ball_shape_props(ball_shape_props, i)
+        # self.gym.set_asset_rigid_shape_properties(ball_asset, ball_shape_props)
 
         ball_handle = self.gym.create_actor(env_ptr, ball_asset, ball_init_pos, "ball", i, 0, 0)
         self.gym.set_rigid_body_color(env_ptr, ball_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,

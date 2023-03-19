@@ -14,7 +14,7 @@ def output_urdf(filename, value):
         f.write("\t\t<inertial>\n")
         f.write("\t\t\t<origin rpy=\"0 0 0\" xyz=\"0 0 0\"/>\n")
         f.write("\t\t\t<mass value=\"0.37\"/>\n")
-        f.write("\t\t\t<inertia ixx=\"0.014\" ixy=\"0.\" ixz=\"0.\" iyy=\"0.014\" iyz=\"0.0\" izz=\"0.014\"/>\n")
+        f.write("\t\t\t<inertia ixx=\"0.064\" ixy=\"0.\" ixz=\"0.\" iyy=\"0.064\" iyz=\"0.0\" izz=\"0.064\"/>\n")
         f.write("\t\t</inertial>\n")
 
         f.write("\t\t<visual>\n")
