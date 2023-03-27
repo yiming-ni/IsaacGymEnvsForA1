@@ -237,7 +237,7 @@ class A1Dribbling(A1AMP):
         # ball_asset_opts.use_mesh_materials = True
 
         if self.randomize_object:
-            asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'base/soccerball_urdfs')
+            asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'base/' + self.size_range)
             object_assets = os.listdir(asset_root)
             for i in range(self.num_envs):
                 asset_file = object_assets[i]
@@ -316,7 +316,10 @@ class A1Dribbling(A1AMP):
         return
 
     def _reset_default(self, env_ids):
-        self._dof_pos[env_ids] = self._initial_dof_pos[env_ids]
+        if self.dr_init_dof:
+            self._dof_pos[env_ids] = self._initial_dof_pos[env_ids] + torch_rand_float(0.5, 1.5, (len(env_ids), self.num_dof), device=self.device)
+        else:
+            self._dof_pos[env_ids] = self._initial_dof_pos[env_ids]
         self._dof_vel[env_ids] = self._initial_dof_vel[env_ids]
 
         self._root_states[env_ids] = self._initial_root_states[env_ids]

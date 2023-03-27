@@ -2,8 +2,7 @@ import os
 
 import numpy as np
 
-sample_path = '../../../assets/urdf/soccerball.urdf'
-a = 0.08
+a = 0.02
 b = 0.12
 
 def output_urdf(filename, value):
@@ -39,10 +38,11 @@ def output_urdf(filename, value):
     return
 
 def main():
-    os.mkdir('soccerball_urdfs')
+    dirname = '002-012'
+    os.mkdir(dirname)
     for i in range(4096):
         val = np.random.uniform(a, b)
-        filename = "soccerball_urdfs/" + str(val)[0] + str(val)[2:6] + '_' + str(i) + ".urdf"
+        filename = dirname + "/" + str(val)[0] + str(val)[2:6] + '_' + str(i) + ".urdf"
         output_urdf(filename, val)
     return
 

@@ -98,6 +98,7 @@ class A1Base(VecTask):
             self.dr_joint_friction = self.domain_rand["randomize_joint_friction"]
             self.dr_base_mass = self.domain_rand["randomize_base_mass"]
             self.dr_pd = self.domain_rand["randomize_PD"]
+            self.dr_init_dof = self.domain_rand["randomize_initial_dof_pos"]
 
 # >>>>>>> sim2real
         super().__init__(config=self.cfg, sim_device=sim_device, graphics_device_id=graphics_device_id,
