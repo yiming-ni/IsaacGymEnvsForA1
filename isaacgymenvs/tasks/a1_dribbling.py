@@ -317,7 +317,7 @@ class A1Dribbling(A1AMP):
 
     def _reset_default(self, env_ids):
         if self.dr_init_dof:
-            self._dof_pos[env_ids] = self._initial_dof_pos[env_ids] + torch_rand_float(0.5, 1.5, (len(env_ids), self.num_dof), device=self.device)
+            self._dof_pos[env_ids] = self._initial_dof_pos[env_ids] * torch_rand_float(0.5, 1.5, (len(env_ids), self.num_dof), device=self.device)
         else:
             self._dof_pos[env_ids] = self._initial_dof_pos[env_ids]
         self._dof_vel[env_ids] = self._initial_dof_vel[env_ids]
