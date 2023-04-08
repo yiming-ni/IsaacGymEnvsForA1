@@ -175,6 +175,7 @@ task:
     mass_ratio_range: 0.75
     inertia_ratio_range: 0.2
     randomize_PD: False
+    randomize_initial_dof_pos: False
     push_robots: False
     push_interval_s: 0.2
     push_ball: False
@@ -198,7 +199,7 @@ task:
     actor_vel_scale: 1.5
     ball_vel_scale: 2.0
     energy_scale: 0.001
-    energy_weight: 0.01
+    energy_weight: 0.0
     ab_dist_threshold: 0.5
     piecewise: True
   goal_reset_freq_inv: 4
@@ -206,7 +207,8 @@ task:
   is_additive: True
   randomize_goal: True
   randomize_obj: false
-  obj_size_range: [0.08, 0.12]
+  obj_size_range: 'soccerball_urdfs'
   obj_density_range: [80, 200]
   ball_size: 0.1
+  
 

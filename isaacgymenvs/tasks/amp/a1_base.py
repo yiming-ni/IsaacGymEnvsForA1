@@ -87,9 +87,6 @@ class A1Base(VecTask):
         self.cfg["env"]["numActions"] = self.get_action_size()
         self.priv_obs = self.cfg['env'].get('priv_obs', False)
 
-
-# <<<<<<< HEAD
-# =======
         # initialize domain randomization
         self.domain_rand = self.cfg["task"].get("domain_rand", None)
         if self.domain_rand:
@@ -98,8 +95,8 @@ class A1Base(VecTask):
             self.dr_joint_friction = self.domain_rand["randomize_joint_friction"]
             self.dr_base_mass = self.domain_rand["randomize_base_mass"]
             self.dr_pd = self.domain_rand["randomize_PD"]
+            self.dr_init_dof = self.domain_rand["randomize_initial_dof_pos"]
 
-# >>>>>>> sim2real
         super().__init__(config=self.cfg, sim_device=sim_device, graphics_device_id=graphics_device_id,
                          headless=headless)
 
@@ -129,7 +126,7 @@ class A1Base(VecTask):
         # self._root_states = gymtorch.wrap_tensor(actor_root_state)
         self._initial_root_states = self._root_states.clone()
         self._initial_root_states[:] = 0
-        self._initial_root_states[..., 2] = 0.28
+        self._initial_root_states[..., 2] = 0.35
         self._initial_root_states[..., 6] = 1
         self._prev_root_states = self._root_states.clone()
 
@@ -522,7 +519,7 @@ class A1Base(VecTask):
         # start_pose.p = gymapi.Vec3(*get_axis_params(0.89, self.up_axis_idx))
         # start_pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
 
-        pos = [0.0, 0.0, 0.28]
+        pos = [0.0, 0.0, 0.42]
         rot = [0.0, 0.0, 0.0, 1.0]
         lin_vel = [0.0, 0.0, 0.0]
         ang_vel = [0.0, 0.0, 0.0]
