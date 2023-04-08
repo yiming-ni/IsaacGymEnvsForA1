@@ -176,7 +176,7 @@ task:
     inertia_ratio_range: 0.2
     randomize_PD: True
     randomize_initial_dof_pos: True
-    push_robots: False
+    push_robots: True
     push_interval_s: 0.2
     push_ball: False
 

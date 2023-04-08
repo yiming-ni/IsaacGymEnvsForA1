@@ -54,7 +54,7 @@ class A1DribblingFOV(A1AMP):
         self.rand_goal = self.cfg["task"]["randomize_goal"]
 
         # init fov
-        self.blind = torch.zeros((self.num_envs, 1), device=self.device, dtype=torch.float)
+        self.blind = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float)
         self.fov = torch.zeros((4,), device=self.device, dtype=torch.float)
         self.fov[0] = 0.5
         self.fov[1] = 8.0
@@ -469,25 +469,20 @@ class A1DribblingFOV(A1AMP):
         # self._goal_xy[:, 1] = 0.0
         # print('goal:', self._goal_xy[0])
         # print('ball:', local_ball_pos[0])
-        self._check_fov(local_ball_pos, env_ids)
+        self._check_fov(local_ball_pos, env_ids=env_ids)
         ob_curr = torch.cat([root_quat, dof_pos, local_ball_pos], dim=-1)
         return ob_curr
 
     def _check_fov(self, local_ball_pos, env_ids=None):
+        outside = ((local_ball_pos[:, 0] < self.fov[0]) |
+                    (local_ball_pos[:, 0] > self.fov[1]) |
+                    (local_ball_pos[:, 1] > self.fov[2] * local_ball_pos[:, 0]) |
+                    (local_ball_pos[:, 1] < - self.fov[2] * local_ball_pos[:, 0]) |
+                    (local_ball_pos[:, 2] > self.fov[-1]))
         if env_ids is None:
-            outside = ((local_ball_pos[:, 0] < self.fov[0]) |
-                       (local_ball_pos[:, 0] > self.fov[1]) |
-                       (local_ball_pos[:, 1] > self.fov[2] * local_ball_pos[:, 0]) |
-                       (local_ball_pos[:, 1] < - self.fov[2] * local_ball_pos[:, 0]) |
-                       (local_ball_pos[:, 2] > self.fov[-1]))
-            self.blind[outside, :] = 1.0
+            self.blind[outside] = 1.0
         else:
-            outside = ((local_ball_pos[env_ids, 0] < self.fov[0]) |
-                       (local_ball_pos[env_ids, 0] > self.fov[1]) |
-                       (local_ball_pos[env_ids, 1] > self.fov[2] * local_ball_pos[env_ids, 0]) |
-                       (local_ball_pos[env_ids, 1] < - self.fov[2] * local_ball_pos[env_ids, 0]) |
-                       (local_ball_pos[env_ids, 2] > self.fov[-1]))
-            self.blind[env_ids, :][outside, :] = 1.0
+            self.blind[env_ids][outside] = 1.0
         return
 
     def reset_idx(self, env_ids):
