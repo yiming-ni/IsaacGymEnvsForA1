@@ -190,7 +190,7 @@ task:
       base_quat: 0.01
       dof_pos: 0.01
       dof_vel: 0.05
-      ball_pos: 0.01
+      ball_pos: 0.1
       gravity: 0.05
       height_measurements: 0.1
 
@@ -199,7 +199,7 @@ task:
     actor_vel_scale: 1.5
     ball_vel_scale: 2.0
     energy_scale: 0.001
-    energy_weight: 0.0
+    energy_weight: 0.01
     ab_dist_threshold: 0.5
     piecewise: True
   goal_reset_freq_inv: 4

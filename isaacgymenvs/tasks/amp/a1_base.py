@@ -87,9 +87,6 @@ class A1Base(VecTask):
         self.cfg["env"]["numActions"] = self.get_action_size()
         self.priv_obs = self.cfg['env'].get('priv_obs', False)
 
-
-# <<<<<<< HEAD
-# =======
         # initialize domain randomization
         self.domain_rand = self.cfg["task"].get("domain_rand", None)
         if self.domain_rand:
@@ -100,7 +97,6 @@ class A1Base(VecTask):
             self.dr_pd = self.domain_rand["randomize_PD"]
             self.dr_init_dof = self.domain_rand["randomize_initial_dof_pos"]
 
-# >>>>>>> sim2real
         super().__init__(config=self.cfg, sim_device=sim_device, graphics_device_id=graphics_device_id,
                          headless=headless)
 

@@ -22,7 +22,7 @@ init_goal_dist = 7.0
 OBJECT = ['sphere', 'box']
 
 
-class A1Dribbling(A1AMP):
+class A1DribblingFOV(A1AMP):
     def __init__(self, cfg, sim_device, graphics_device_id, headless):
         self.obj = None
         self.randomize_object = cfg['task']['randomize_obj']
@@ -52,6 +52,14 @@ class A1Dribbling(A1AMP):
         self.goal_reset = self.cfg["task"]["goal_reset_freq_inv"]
         self.goal_reset_upper_inv = self.cfg["task"]["goal_reset_freq_inv_upper"]
         self.rand_goal = self.cfg["task"]["randomize_goal"]
+
+        # init fov
+        self.blind = torch.zeros((self.num_envs, 1), device=self.device, dtype=torch.float)
+        self.fov = torch.zeros((4,), device=self.device, dtype=torch.float)
+        self.fov[0] = 0.5
+        self.fov[1] = 8.0
+        self.fov[2] = 1.732
+        self.fov[-1] = 0.3
 
     def get_obs_size(self):
         obs_size = super().get_obs_size()
@@ -363,6 +371,7 @@ class A1Dribbling(A1AMP):
                                             self._goal_pos,
                                             self._ball_root_states[:, :2],
                                             self._prev_ball_states[:, :2],
+                                            self.blind,
                                             self.dt,
                                             self.torques,
                                             self._dof_vel,
@@ -376,11 +385,6 @@ class A1Dribbling(A1AMP):
                                             )
         self.rew_buf[:] = rew_dict["total_rew"]
         return rew_dict
-
-    def _compute_observations(self, env_ids=None):
-        super()._compute_observations(env_ids)
-        self._goal_xy += torch.rand_like(self._goal_xy) * self.noise_scale_vec[0]
-        return
 
     def _compute_a1_obs_full_states(self, env_ids=None):
         if (env_ids is None):
@@ -425,6 +429,7 @@ class A1Dribbling(A1AMP):
             else:
                 ball_pos = self._ball_root_states[:, :3]
             goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
+
             # local_ball_pos[...] = 0.0
             # local_ball_pos[:, 0] = 3.0
             self._goal_xy[:] = goal_xy
@@ -464,8 +469,26 @@ class A1Dribbling(A1AMP):
         # self._goal_xy[:, 1] = 0.0
         # print('goal:', self._goal_xy[0])
         # print('ball:', local_ball_pos[0])
+        self._check_fov(local_ball_pos, env_ids)
         ob_curr = torch.cat([root_quat, dof_pos, local_ball_pos], dim=-1)
         return ob_curr
+
+    def _check_fov(self, local_ball_pos, env_ids=None):
+        if env_ids is None:
+            outside = ((local_ball_pos[:, 0] < self.fov[0]) |
+                       (local_ball_pos[:, 0] > self.fov[1]) |
+                       (local_ball_pos[:, 1] > self.fov[2] * local_ball_pos[:, 0]) |
+                       (local_ball_pos[:, 1] < - self.fov[2] * local_ball_pos[:, 0]) |
+                       (local_ball_pos[:, 2] > self.fov[-1]))
+            self.blind[outside, :] = 1.0
+        else:
+            outside = ((local_ball_pos[env_ids, 0] < self.fov[0]) |
+                       (local_ball_pos[env_ids, 0] > self.fov[1]) |
+                       (local_ball_pos[env_ids, 1] > self.fov[2] * local_ball_pos[env_ids, 0]) |
+                       (local_ball_pos[env_ids, 1] < - self.fov[2] * local_ball_pos[env_ids, 0]) |
+                       (local_ball_pos[env_ids, 2] > self.fov[-1]))
+            self.blind[env_ids, :][outside, :] = 1.0
+        return
 
     def reset_idx(self, env_ids):
         self._reset_actors(env_ids)
@@ -709,12 +732,12 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
     return obs
 
 
-@torch.jit.script
+# @torch.jit.script
 def compute_a1_reward(
-    root_states, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, dt, torque, 
+    root_states, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, blind, dt, torque,
     dof_vel, actor_vel_scale, ball_vel_scale, energy_scale, energy_weight, ab_dist_threshold, piecewise, additive):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, Tensor, Tensor, float, float, float, float, float, bool, bool) -> Dict[str, Tensor]
-    
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, float, Tensor, Tensor, float, float, float, float, float, bool, bool) -> Dict[str, Tensor]
+
     root_xy = root_states[:, :2]
     # energy saving reward
     energy_sum = torch.sum(torch.square(torque * dof_vel), dim=1)
@@ -749,6 +772,7 @@ def compute_a1_reward(
         actor_vel_move = torch.where(dist<0.2, torch.ones_like(actor_vel_move), torch.where(dist_b<0.2, torch.ones_like(actor_vel_move), actor_vel_move))
         reward = 0.1 * actor_vel_static + 0.1 * actor_vel_move + 0.4 * ball_vel_static + 0.4 * ball_vel_move
         total_reward = (1 - energy_weight) * reward + energy_weight * energy_reward
+        total_reward = torch.where(blind == 1.0, torch.zeros_like(total_reward), total_reward)
         rewards = {
         "actor_dist/static_rew": actor_vel_static,
         "actor_move_rew": actor_vel_move,
@@ -779,6 +803,7 @@ def compute_a1_reward(
         reward = 0.1 * actor_vel_reward + 0.1 * actor_dist_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
         total_reward = (1 - energy_weight) * reward + energy_weight * energy_reward
         total_reward = torch.where(dist < 0.2, torch.ones_like(total_reward), total_reward)
+        total_reward = torch.where(blind == 1.0, torch.zeros_like(total_reward), total_reward)
         rewards = {
         "actor_dist/static_rew": actor_dist_reward,
         "actor_move_rew": actor_vel_reward,
