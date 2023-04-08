@@ -141,10 +141,10 @@ class A1Dribbling(A1AMP):
             self._goal_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers + 1, self.num_dof + 1)[..., 2, :]
         return
 
-    def process_ball_shape_props(self, props, i):
-        for p in range(len(props)):
-            props[p].restitution = 1.0
-        return props
+    # def process_ball_shape_props(self, props, i):
+    #     for p in range(len(props)):
+    #         props[p].restitution = 1.0
+    #     return props
 
     def _process_ball_body_props(self, props, i):
         if self.randomize_object:
@@ -167,9 +167,9 @@ class A1Dribbling(A1AMP):
         ball_init_pos.p.y = self.initial_ball_pos[i, 1]
         ball_init_pos.p.z = self.initial_ball_pos[i, 2]
 
-        ball_shape_props = self.gym.get_asset_rigid_shape_properties(ball_asset)
-        ball_shape_props = self.process_ball_shape_props(ball_shape_props, i)
-        self.gym.set_asset_rigid_shape_properties(ball_asset, ball_shape_props)
+        # ball_shape_props = self.gym.get_asset_rigid_shape_properties(ball_asset)
+        # ball_shape_props = self.process_ball_shape_props(ball_shape_props, i)
+        # self.gym.set_asset_rigid_shape_properties(ball_asset, ball_shape_props)
 
         ball_handle = self.gym.create_actor(env_ptr, ball_asset, ball_init_pos, "ball", i, 0, 0)
         self.gym.set_rigid_body_color(env_ptr, ball_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION,
@@ -239,8 +239,9 @@ class A1Dribbling(A1AMP):
         if self.randomize_object:
             asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'base/soccerball_urdfs')
             object_assets = os.listdir(asset_root)
+            offset = int(np.random.uniform(0, self.num_envs, 1))
             for i in range(self.num_envs):
-                asset_file = object_assets[i]
+                asset_file = object_assets[(i + offset) % self.num_envs]
                 ball_rad = float(asset_file[0] + '.' + asset_file[1:5])
                 ball_asset = self.gym.load_asset(self.sim, asset_root, asset_file, ball_asset_opts)
                 # ball_asset_opts.angular_damping = np.random.uniform(0.5, 3.)
@@ -250,7 +251,7 @@ class A1Dribbling(A1AMP):
                 # ball_asset = self.gym.create_sphere(self.sim, ball_rad, ball_asset_opts)
                 self.height = ball_rad + 1e-4
                 asset.append(ball_asset)
-            self.initial_ball_pos[..., 2] = self.height
+                self.initial_ball_pos[i, 2] = self.height
         else:
             if "asset" in self.cfg["env"]:
                 asset_file = self.cfg["env"]["asset"]["ballAsset"]

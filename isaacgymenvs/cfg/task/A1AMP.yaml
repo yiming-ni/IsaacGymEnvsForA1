@@ -201,8 +201,8 @@ task:
     energy_weight: 0.01
     ab_dist_threshold: 0.5
     piecewise: True
-  goal_reset_freq_inv: 2.5
-  goal_reset_freq_inv_upper: 1.5
+  goal_reset_freq_inv: 4
+  goal_reset_freq_inv_upper: 2
   is_additive: True
   randomize_goal: True
   randomize_obj: false
