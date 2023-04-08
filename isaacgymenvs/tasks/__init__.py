@@ -45,6 +45,7 @@ from tasks.amp.a1_base import A1Base, A1BaseTrial
 from tasks.test_motion import TestMotion
 from tasks.a1_navigation import A1Navigation
 from tasks.a1_dribbling import A1Dribbling
+from tasks.a1_dribbling_fov import A1DribblingFOV
 
 # Mappings from strings to environments
 isaacgym_task_map = {
@@ -67,5 +68,6 @@ isaacgym_task_map = {
     "TestMotion": TestMotion,
     "TestHumanoidMotion": TestHumanoidMotion,
     "A1Navigation": A1Navigation,
-    "A1Dribbling": A1Dribbling
+    "A1Dribbling": A1Dribbling,
+    "A1DribblingFOV": A1DribblingFOV
 }
