@@ -481,8 +481,10 @@ class A1DribblingFOV(A1AMP):
                     (local_ball_pos[:, 2] > self.fov[-1]))
         if env_ids is None:
             self.blind[outside] = 1.0
+            self.blind[~outside] = 0.0
         else:
             self.blind[env_ids][outside] = 1.0
+            self.blind[env_ids][~outside] = 0.0
         return
 
     def reset_idx(self, env_ids):
