@@ -62,7 +62,7 @@ class A1DribblingFOV(A1AMP):
         self.fov[-1] = 0.3
 
         # init local_ball_pos_prev
-        self.local_ball_pos_prev = torch.zeros((self.num_envs, 2), device=self.device, dtype=torch.float)
+        self.local_ball_pos_prev = torch.zeros((self.num_envs, 3), device=self.device, dtype=torch.float)
 
     def get_obs_size(self):
         obs_size = super().get_obs_size()
@@ -407,9 +407,9 @@ class A1DribblingFOV(A1AMP):
             else:
                 ball_pos = self._ball_root_states[:, :3]
             goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
+            local_ball_pos_prev = self.local_ball_pos_prev
+            blind = self.blind
 
-            # local_ball_pos[...] = 0.0
-            # local_ball_pos[:, 0] = 3.0
             self._goal_xy[:] = goal_xy
             if self.priv_obs:
                 self._priv_goal_xy[:] = goal_xy
@@ -425,9 +425,7 @@ class A1DribblingFOV(A1AMP):
                 dof_pos = self._dof_pos[env_ids]
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
-            # root_quat = quat_to_tan_norm(root_quat)
-            # goal_pos = torch.zeros((len(env_ids), 3), dtype=torch.float, device=self.device)
-            # goal_pos[..., 2] = 0.2
+
             goal_pos = self._goal_pos[env_ids]
             if self.add_ball_delay:
                 ball_pos = self.delayed_ball_obs[env_ids, 0, :]
@@ -436,38 +434,36 @@ class A1DribblingFOV(A1AMP):
             else:
                 ball_pos = self._ball_root_states[env_ids, :3]
             goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
-            # local_ball_pos[env_ids, :] = 0.0
-            # local_ball_pos[env_ids, 0] = 3.0
+            local_ball_pos_prev = self.local_ball_pos_prev[env_ids]
+            blind = self.blind[env_ids]
+
             self._goal_xy[env_ids] = goal_xy
             if self.priv_obs:
                 self._priv_goal_xy[env_ids] = goal_xy
 
-        self._check_fov(local_ball_pos, env_ids=env_ids)
+        local_ball_pos, local_ball_pos_prev, blind = self._check_fov(local_ball_pos, local_ball_pos_prev, blind)
         ob_curr = torch.cat([root_quat, dof_pos, local_ball_pos], dim=-1)
+        if env_ids is None:
+            self.local_ball_pos_prev[:] = local_ball_pos_prev
+            self.blind[:] = blind
+        else:
+            self.local_ball_pos_prev[env_ids] = local_ball_pos_prev
+            self.blind[env_ids] = blind
         return ob_curr
 
-    def _check_fov(self, local_ball_pos, env_ids=None):
+    def _check_fov(self, local_ball_pos, local_ball_pos_prev, blind):
         outside = ((local_ball_pos[:, 0] < self.fov[0]) |
                     (local_ball_pos[:, 0] > self.fov[1]) |
                     (local_ball_pos[:, 1] > self.fov[2] * local_ball_pos[:, 0]) |
                     (local_ball_pos[:, 1] < - self.fov[2] * local_ball_pos[:, 0]) |
                     (local_ball_pos[:, 2] > self.fov[-1]))
-        if env_ids is None:
-            self.blind[outside] = 1.0
-            self.blind[~outside] = 0.0
-            local_ball_pos[outside] = self.local_ball_pos_prev[outside]
-            self.local_ball_pos_prev[~outside] = local_ball_pos[~outside]
-        else:
-            self.blind[env_ids][outside] = 1.0
-            self.blind[env_ids][~outside] = 0.0
-            local_ball_pos[outside] = self.local_ball_pos_prev[env_ids][outside]
-            self.local_ball_pos_prev[env_ids][~outside] = local_ball_pos[~outside]
 
-        return
+        blind[outside] = 1.0
+        blind[~outside] = 0.0
+        local_ball_pos[outside] = local_ball_pos_prev[outside]
+        local_ball_pos_prev[~outside] = local_ball_pos[~outside]
 
-    def _reset_obs(self, env_ids):
-        super()._reset_obs(env_ids)
-        self.local_ball_pos_prev[env_ids] = 0.
+        return local_ball_pos, local_ball_pos_prev, blind
 
     def reset_idx(self, env_ids):
         self._reset_actors(env_ids)
@@ -597,6 +593,8 @@ class A1DribblingFOV(A1AMP):
         return
 
     def _compute_observations(self, env_ids=None):
+        if env_ids is not None:
+            self.local_ball_pos_prev[env_ids] = 0.
         super()._compute_observations(env_ids)
         if env_ids is None:
             self._goal_xy += torch.rand_like(self._goal_xy) * 0.05
