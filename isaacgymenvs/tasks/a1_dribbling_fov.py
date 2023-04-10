@@ -709,7 +709,7 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
     return obs
 
 
-# @torch.jit.script
+@torch.jit.script
 def compute_a1_reward(
     root_states, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, blind, dt, torque,
     dof_vel, actor_vel_scale, ball_vel_scale, energy_scale, energy_weight, ab_dist_threshold, piecewise, additive):
