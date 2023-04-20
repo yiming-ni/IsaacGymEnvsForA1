@@ -56,8 +56,8 @@ class A1DribblingFOV(A1AMP):
         # init fov
         self.blind = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float)
         self.fov = torch.zeros((4,), device=self.device, dtype=torch.float)
-        self.fov[0] = 0.5
-        self.fov[1] = 8.0
+        self.fov[0] = 0.25
+        self.fov[1] = 5.0
         self.fov[2] = 1.732
         self.fov[-1] = 0.3
 
@@ -250,14 +250,10 @@ class A1DribblingFOV(A1AMP):
                 asset_file = object_assets[(i + offset) % self.num_envs]
                 ball_rad = float(asset_file[0] + '.' + asset_file[1:5])
                 ball_asset = self.gym.load_asset(self.sim, asset_root, asset_file, ball_asset_opts)
-                # ball_asset_opts.angular_damping = np.random.uniform(0.5, 3.)
-                # ball_asset_opts.linear_damping = np.random.uniform(0.5, 3.)
-                # ball_asset_opts.density = np.random.uniform(self.density_range[0], self.density_range[1])
-                # ball_rad = np.random.uniform(self.size_range[0], self.size_range[1])
-                # ball_asset = self.gym.create_sphere(self.sim, ball_rad, ball_asset_opts)
                 self.height = ball_rad + 1e-4
                 asset.append(ball_asset)
                 self.initial_ball_pos[i, 2] = self.height
+            
         else:
             if "asset" in self.cfg["env"]:
                 asset_file = self.cfg["env"]["asset"]["ballAsset"]
@@ -894,7 +890,6 @@ def compute_goal_observations(root_states, goal_pos, ball_pos):
 
     local_ball_pos = ball_pos - root_pos
     local_ball_pos = my_quat_rotate(heading_rot, local_ball_pos)
-    local_ball_pos[:, 2] = ball_pos[:, 2]
 
     return flat_local_goal_xy, local_ball_pos
 
