@@ -57,7 +57,7 @@ class A1DribblingFOV(A1AMP):
         self.blind = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float)
         self.fov = torch.zeros((4,), device=self.device, dtype=torch.float)
         self.fov[0] = 0.25
-        self.fov[1] = 5.0
+        self.fov[1] = 6.0
         self.fov[2] = 1.732
         self.fov[-1] = 0.3
 
@@ -320,7 +320,7 @@ class A1DribblingFOV(A1AMP):
 
     def _reset_default(self, env_ids):
         if self.dr_init_dof:
-            self._dof_pos[env_ids] = self._initial_dof_pos[env_ids] * torch_rand_float(0.5, 1.5, (len(env_ids), self.num_dof), device=self.device)
+            self._dof_pos[env_ids] = self._initial_dof_pos[env_ids] * torch_rand_float(0.9, 1.1, (len(env_ids), self.num_dof), device=self.device)
         else:
             self._dof_pos[env_ids] = self._initial_dof_pos[env_ids]
         self._dof_vel[env_ids] = self._initial_dof_vel[env_ids]
@@ -525,7 +525,7 @@ class A1DribblingFOV(A1AMP):
         if self.limit_space:
             self._reset_limited_ball_pos(env_ids)
         else:
-            ball_dist = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 5.0
+            ball_dist = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 6.0
             ball_rot = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * torch.pi * 2
             self.initial_ball_pos[env_ids, 0] = torch.flatten(ball_dist * torch.cos(ball_rot)) + self._root_states[env_ids, 0]
             self.initial_ball_pos[env_ids, 1] = torch.flatten(ball_dist * torch.sin(ball_rot)) + self._root_states[env_ids, 1]

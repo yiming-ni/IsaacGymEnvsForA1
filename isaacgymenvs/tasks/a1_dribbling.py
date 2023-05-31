@@ -235,6 +235,7 @@ class A1Dribbling(A1AMP):
         ball_asset_opts.fix_base_link = False
         ball_asset_opts.override_inertia = True
         # ball_asset_opts.use_mesh_materials = True
+        # ball_asset_opts.density = 0.1
 
         if self.randomize_object:
             asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'base/' + self.size_range)
@@ -252,6 +253,13 @@ class A1Dribbling(A1AMP):
                 self.height = ball_rad + 1e-4
                 asset.append(ball_asset)
                 self.initial_ball_pos[i, 2] = self.height
+            # todo hack box
+            # for i in range(self.num_envs):
+            #     ball_rad = 0.2
+            #     ball_asset = self.gym.create_box(self.sim, ball_rad, ball_rad, ball_rad, ball_asset_opts)
+            #     self.height = 0.1
+            #     asset.append(ball_asset)
+            #     self.initial_ball_pos[i, 2] = self.height
         else:
             if "asset" in self.cfg["env"]:
                 asset_file = self.cfg["env"]["asset"]["ballAsset"]
@@ -318,7 +326,7 @@ class A1Dribbling(A1AMP):
 
     def _reset_default(self, env_ids):
         if self.dr_init_dof:
-            self._dof_pos[env_ids] = self._initial_dof_pos[env_ids] * torch_rand_float(0.5, 1.5, (len(env_ids), self.num_dof), device=self.device)
+            self._dof_pos[env_ids] = self._initial_dof_pos[env_ids] * torch_rand_float(0.9, 1.1, (len(env_ids), self.num_dof), device=self.device)
         else:
             self._dof_pos[env_ids] = self._initial_dof_pos[env_ids]
         self._dof_vel[env_ids] = self._initial_dof_vel[env_ids]
@@ -424,9 +432,19 @@ class A1Dribbling(A1AMP):
                 self.delayed_ball_obs[:, -1, :] = self._ball_root_states[:, :3]
             else:
                 ball_pos = self._ball_root_states[:, :3]
+
+            # goal_pos[:, 0] = 3
+            # goal_pos[:, 1] = 0
+            # goal_pos[:, 2] = 0
+            # ball_pos[:, 0] = 2
+            # ball_pos[:, 1] = 1
+            # ball_pos[:, 2] = 0.1
+
+
             goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
             # local_ball_pos[...] = 0.0
             # local_ball_pos[:, 0] = 3.0
+            # local_ball_pos[:, 2] = 0.1
             self._goal_xy[:] = goal_xy
             if self.priv_obs:
                 self._priv_goal_xy[:] = goal_xy
@@ -452,9 +470,18 @@ class A1Dribbling(A1AMP):
                 self.delayed_ball_obs[env_ids, -1, :] = self._ball_root_states[env_ids, :3]
             else:
                 ball_pos = self._ball_root_states[env_ids, :3]
+
+            # goal_pos[:, 0] = 3
+            # goal_pos[:, 1] = 0
+            # goal_pos[:, 2] = 0
+            # ball_pos[:, 0] = 2
+            # ball_pos[:, 1] = 1
+            # ball_pos[:, 2] = 0.1
+
             goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
             # local_ball_pos[env_ids, :] = 0.0
             # local_ball_pos[env_ids, 0] = 3.0
+            # local_ball_pos[:, 2] = 0.1
             self._goal_xy[env_ids] = goal_xy
             if self.priv_obs:
                 self._priv_goal_xy[env_ids] = goal_xy

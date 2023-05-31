@@ -126,7 +126,7 @@ class A1Base(VecTask):
         # self._root_states = gymtorch.wrap_tensor(actor_root_state)
         self._initial_root_states = self._root_states.clone()
         self._initial_root_states[:] = 0
-        self._initial_root_states[..., 2] = 0.35
+        self._initial_root_states[..., 2] = 0.305
         self._initial_root_states[..., 6] = 1
         self._prev_root_states = self._root_states.clone()
 
@@ -519,7 +519,7 @@ class A1Base(VecTask):
         # start_pose.p = gymapi.Vec3(*get_axis_params(0.89, self.up_axis_idx))
         # start_pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
 
-        pos = [0.0, 0.0, 0.42]
+        pos = [0.0, 0.0, 0.3]
         rot = [0.0, 0.0, 0.0, 1.0]
         lin_vel = [0.0, 0.0, 0.0]
         ang_vel = [0.0, 0.0, 0.0]
