@@ -46,7 +46,7 @@ DOF_BODY_IDS = [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15]
 DOF_OFFSETS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 NUM_CURR_OBS = 18
 NUM_ACTIONS = 12
-NUM_OBS = (NUM_CURR_OBS + NUM_ACTIONS) * 15 + NUM_CURR_OBS  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
+# NUM_OBS = (NUM_CURR_OBS + NUM_ACTIONS) * 15 + NUM_CURR_OBS  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
 # base_height, base_orientation=4, base_angular_vel=3, joint_pos=12, joint_velocity=12
 # orientation, joint_pos, 4+12+history
 
@@ -82,6 +82,7 @@ class A1Base(VecTask):
         self._termination_height = self.cfg["env"]["terminationHeight"]
         self._enable_early_termination = self.cfg["env"]["enableEarlyTermination"]
         self.history_steps = self.cfg["env"].get("historySteps", None)
+        self.history_num_obs = (NUM_CURR_OBS + NUM_ACTIONS) * self.history_steps + NUM_CURR_OBS
 
         self.cfg["env"]["numObservations"] = self.get_obs_size()
         self.cfg["env"]["numActions"] = self.get_action_size()
@@ -278,7 +279,7 @@ class A1Base(VecTask):
     def get_obs_size(self):
         if self.history_steps is None:
             return 1 + 6 + 3 + 3 + 12 + 12 + 4*3  # full state obs
-        return NUM_OBS
+        return self.history_num_obs
 
     def get_action_size(self):
         return NUM_ACTIONS

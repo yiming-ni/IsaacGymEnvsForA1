@@ -8,7 +8,7 @@ rl_device: ${..rl_device}
 # if given, will override the device setting in gym.
 env:
   priv_obs: false
-  historySteps: 15
+  historySteps: 8
   numEnvs: ${resolve_default:4096,${...num_envs}}
   envSpacing: 3
   episodeLength: 2000
