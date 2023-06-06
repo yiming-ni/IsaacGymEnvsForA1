@@ -16,10 +16,16 @@ from isaacgymenvs.utils.torch_jit_utils import *
 import numpy as np
 
 ADDITIONAL_OBS_NUM = 3 + 6 + 3 + 3 + 2  # local pos, 6d rot, linear vel, angular vel of the ball, goal pos
-NUM_CURR_OBS = 18 + 3
+NUM_CURR_OBS = 18
+NUM_BALL_OBS = 3
+LIMIT_SPACE_OBS = 8
+GLOBAL_POS_OBS = 2
 BALL_RAD = 0.1
 init_goal_dist = 7.0
 OBJECT = ['sphere', 'box']
+SPACE_VERTICES = [0, -3, 0, 3, 6, -3, 6, 3]
+SPACE_X = SPACE_VERTICES[4] - SPACE_VERTICES[0]
+SPACE_Y = SPACE_VERTICES[3] - SPACE_VERTICES[1]
 
 
 class A1DribblingFOV(A1AMP):
@@ -54,7 +60,6 @@ class A1DribblingFOV(A1AMP):
         self.rand_goal = self.cfg["task"]["randomize_goal"]
 
         # init fov
-        self.blind = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float)
         self.fov = torch.zeros((4,), device=self.device, dtype=torch.float)
         self.fov[0] = 0.25
         self.fov[1] = 6.0
@@ -68,22 +73,41 @@ class A1DribblingFOV(A1AMP):
         obs_size = super().get_obs_size()
         if self.history_steps is None:
             return obs_size + ADDITIONAL_OBS_NUM
+        elif self.limit_space:
+            return obs_size + 2 + 3 * (self.history_steps+1) + 1 + LIMIT_SPACE_OBS + GLOBAL_POS_OBS
         else:
-            return obs_size + 2 + 3 * (self.history_steps+1)
+            return obs_size + 2 + 3 * (self.history_steps+1) + 1
 
     def _init_obs_tensors(self):
         if self.history_steps is not None:
             states_idx = NUM_CURR_OBS * (self.history_steps + 1)
+            ball_idx = states_idx + NUM_BALL_OBS * (self.history_steps + 1)
+            goal_idx = ball_idx + 2
             self._states_history = self.obs_buf[:, :states_idx].view(self.num_envs, self.history_steps + 1,
                                                                      -1)  # last entry is current obs
-            self._goal_xy = self.obs_buf[:, states_idx:states_idx + 2]
-            self._actions_history = self.obs_buf[:, states_idx + 2:].view(self.num_envs, self.history_steps, -1)
-            if self.priv_obs:
-                self.priv_obs_buf = torch.zeros_like(self.obs_buf)
-                self._priv_states_history = self.priv_obs_buf[:, :states_idx].view(self.num_envs, self.history_steps + 1,
+            self._ball_history = self.obs_buf[:, states_idx:ball_idx].view(self.num_envs, self.history_steps + 1,
                                                                      -1)
-                self._priv_goal_xy = self.priv_obs_buf[:, states_idx:states_idx + 2]
-                self._priv_actions_history = self.priv_obs_buf[:, states_idx + 2:].view(self.num_envs, self.history_steps, -1)
+            self._goal_xy = self.obs_buf[:, ball_idx:goal_idx]
+            
+            if self.limit_space:
+                global_pos_idx = goal_idx + 2
+                vertices_idx = global_pos_idx + 8
+                self._global_pos = self.obs_buf[:, goal_idx:global_pos_idx]
+                self._vertices_pos = self.obs_buf[:, global_pos_idx:vertices_idx]
+                self._vertices_pos[:, 0] = SPACE_VERTICES[0]
+                self._vertices_pos[:, 1] = SPACE_VERTICES[1]
+                self._vertices_pos[:, 2] = SPACE_VERTICES[2]
+                self._vertices_pos[:, 3] = SPACE_VERTICES[3]
+                self._vertices_pos[:, 4] = SPACE_VERTICES[4]
+                self._vertices_pos[:, 5] = SPACE_VERTICES[5]
+                self._vertices_pos[:, 6] = SPACE_VERTICES[6]
+                self._vertices_pos[:, 7] = SPACE_VERTICES[7]
+                self._actions_history = self.obs_buf[:, vertices_idx:-1].view(self.num_envs, self.history_steps, -1)
+            else:
+                self._actions_history = self.obs_buf[:, goal_idx:-1].view(self.num_envs, self.history_steps, -1)
+
+            self.blind = self.obs_buf[:, -1]
+
         return
 
     def _get_rigid_body_states_from_tensor(self, states_tensor):
@@ -120,12 +144,6 @@ class A1DribblingFOV(A1AMP):
             self.perturbation_enabled_episodes & mask & apply_mask].uniform_(-20, 20)
         self.perturbation_torques[self.perturbation_enabled_episodes & mask & apply_mask] = self.perturbation_torques[
             self.perturbation_enabled_episodes & mask & apply_mask].uniform_(-5, 5)
-
-        if self.push_ball:
-            ball_forces = forces[:, self.rb_states.shape[1]:self.ball_states.shape[1], :]
-            ball_torques = torques[:, self.rb_states.shape[1]:self.ball_states.shape[1], :]
-            ball_forces[~mask] = self.perturbation_forces[~mask].expand(-1, self.ball_states.shape[1], -1)
-            ball_torques[~mask] = self.perturbation_torques[~mask].expand(-1, self.ball_states.shape[1], -1)
 
         actor_forces[~mask] = self.perturbation_forces[~mask].expand(-1, self.rb_states.shape[1], -1)
         actor_torques[~mask] = self.perturbation_torques[~mask].expand(-1, self.rb_states.shape[1], -1)
@@ -193,10 +211,10 @@ class A1DribblingFOV(A1AMP):
                 marker_asset[-3], marker_asset[-2], marker_asset[-1]
                 bound_left_pos, bound_right_pos, bound_top_pos, bound_bottom_pos = init_goal_pos[2], init_goal_pos[3], \
                 init_goal_pos[4], init_goal_pos[5]
-                bound_left_pos.p.x, bound_left_pos.p.y, bound_left_pos.p.z = self.space_length / 2, 0, 0.03
-                bound_right_pos.p.x, bound_right_pos.p.y, bound_right_pos.p.z = -self.space_length / 2, 0, 0.03
-                bound_top_pos.p.x, bound_top_pos.p.y, bound_top_pos.p.z = 0, self.space_width // 2, 0.03
-                bound_bottom_pos.p.x, bound_bottom_pos.p.y, bound_bottom_pos.p.z = 0, -self.space_width // 2, 0.03
+                bound_left_pos.p.x, bound_left_pos.p.y, bound_left_pos.p.z = SPACE_VERTICES[0], SPACE_VERTICES[1], 0.03
+                bound_right_pos.p.x, bound_right_pos.p.y, bound_right_pos.p.z = SPACE_VERTICES[2], SPACE_VERTICES[3], 0.03
+                bound_top_pos.p.x, bound_top_pos.p.y, bound_top_pos.p.z = SPACE_VERTICES[4], SPACE_VERTICES[5], 0.03
+                bound_bottom_pos.p.x, bound_bottom_pos.p.y, bound_bottom_pos.p.z = SPACE_VERTICES[6], SPACE_VERTICES[7], 0.03
                 bound_left_handle = self.gym.create_actor(env_ptr, bound_left_asset, bound_left_pos, "bound_left",
                                                           i + self.num_envs, 1, 0)
                 bound_right_handle = self.gym.create_actor(env_ptr, bound_right_asset, bound_right_pos, "bound_right",
@@ -259,10 +277,6 @@ class A1DribblingFOV(A1AMP):
                 asset_file = self.cfg["env"]["asset"]["ballAsset"]
             asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
             ball_asset = self.gym.load_asset(self.sim, asset_root, asset_file, ball_asset_opts)
-            # ball_asset_opts.angular_damping = 1.
-            # ball_asset_opts.linear_damping = 1.
-            # ball_asset = self.gym.create_sphere(self.sim, self.ball_rad, ball_asset_opts)
-            # self.height = self.ball_rad + 1e-4
             asset.append(ball_asset)
         init_ball_pos = gymapi.Transform()
         self.num_markers = 1
@@ -299,6 +313,8 @@ class A1DribblingFOV(A1AMP):
 
     def _set_env_state(self, env_ids, root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel):
         self._root_states[env_ids, 0:3] = root_pos
+        self._root_states[env_ids, 0] = 0
+        self._root_states[env_ids, 1] = 0  # place the actor at 0
         self._root_states[env_ids, 3:7] = root_rot
         self._root_states[env_ids, 7:10] = root_vel
         self._root_states[env_ids, 10:13] = root_ang_vel
@@ -392,9 +408,7 @@ class A1DribblingFOV(A1AMP):
                 dof_pos = self._dof_pos
             if self._local_root_obs:
                 root_quat = compute_local_root_quat(root_quat)
-            # root_quat = quat_to_tan_norm(root_quat)
-            # goal_pos = torch.zeros((self.num_envs, 3), dtype=torch.float, device=self.device)
-            # goal_pos[..., 2] = 0.2
+
             goal_pos = self._goal_pos
             if self.add_ball_delay:
                 ball_pos = self.delayed_ball_obs[:, 0, :]
@@ -403,12 +417,11 @@ class A1DribblingFOV(A1AMP):
             else:
                 ball_pos = self._ball_root_states[:, :3]
             goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
-            local_ball_pos_prev = self.local_ball_pos_prev
+            ball_history = self._ball_history
             blind = self.blind
 
             self._goal_xy[:] = goal_xy
-            if self.priv_obs:
-                self._priv_goal_xy[:] = goal_xy
+            self._global_pos[:] = root_states[:, :2]
 
         else:
             if self.add_delay:
@@ -430,24 +443,23 @@ class A1DribblingFOV(A1AMP):
             else:
                 ball_pos = self._ball_root_states[env_ids, :3]
             goal_xy, local_ball_pos = compute_goal_observations(root_states, goal_pos, ball_pos)
-            local_ball_pos_prev = self.local_ball_pos_prev[env_ids]
+            ball_history = self._ball_history[env_ids]
             blind = self.blind[env_ids]
 
             self._goal_xy[env_ids] = goal_xy
-            if self.priv_obs:
-                self._priv_goal_xy[env_ids] = goal_xy
+            self._global_pos[env_ids] = root_states[:, :2]
 
-        local_ball_pos, local_ball_pos_prev, blind = self._check_fov(local_ball_pos, local_ball_pos_prev, blind)
-        ob_curr = torch.cat([root_quat, dof_pos, local_ball_pos], dim=-1)
+        ball_history, blind = self._check_fov(local_ball_pos, blind, ball_history)
+        ob_curr = torch.cat([root_quat, dof_pos], dim=-1)
         if env_ids is None:
-            self.local_ball_pos_prev[:] = local_ball_pos_prev
             self.blind[:] = blind
+            self._ball_history[:] = ball_history
         else:
-            self.local_ball_pos_prev[env_ids] = local_ball_pos_prev
             self.blind[env_ids] = blind
+            self._ball_history[env_ids] = ball_history
         return ob_curr
 
-    def _check_fov(self, local_ball_pos, local_ball_pos_prev, blind):
+    def _check_fov(self, local_ball_pos, blind, ball_history):
         outside = ((local_ball_pos[:, 0] < self.fov[0]) |
                     (local_ball_pos[:, 0] > self.fov[1]) |
                     (local_ball_pos[:, 1] > self.fov[2] * local_ball_pos[:, 0]) |
@@ -456,10 +468,20 @@ class A1DribblingFOV(A1AMP):
 
         blind[outside] = 1.0
         blind[~outside] = 0.0
-        local_ball_pos[outside] = local_ball_pos_prev[outside]
-        local_ball_pos_prev[~outside] = local_ball_pos[~outside]
 
-        return local_ball_pos, local_ball_pos_prev, blind
+        if self.add_noise:
+            local_ball_pos += torch.rand_like(local_ball_pos) * self.cfg['tasks']['noise']['noise_scales']['ball_pos']
+        
+        ball_history[~outside] = ball_history[~outside].roll(-1, 1)
+        ball_history[~outside, -1, :] = local_ball_pos[~outside]
+
+        return ball_history, blind
+
+    def _reset_obs(self, env_ids):
+        super()._reset_obs(env_ids)
+        self._ball_history[env_ids] = self._ball_history[env_ids, -1:, :]
+        # vertices do not change because robot always initiated at 0
+        # self._vertices_pos[env_ids] = self._global_pos[env_ids] + [0, -3, 0, 3, 6, -3, 6, 3]
 
     def reset_idx(self, env_ids):
         self._reset_actors(env_ids)
@@ -493,7 +515,6 @@ class A1DribblingFOV(A1AMP):
         noise_vec = torch.zeros(NUM_CURR_OBS, dtype=torch.float, device=self.device)
         noise_vec[:6] = noise_scales["base_quat"] * noise_level
         noise_vec[6:18] = noise_scales["dof_pos"] * noise_level
-        noise_vec[18:21] = noise_scales["ball_pos"] * noise_level
         self.noise_scale_dof_vel = noise_scales["dof_vel"] * noise_level
         return noise_vec
 
@@ -508,10 +529,6 @@ class A1DribblingFOV(A1AMP):
         rew_dict = super().post_physics_step()
         self._pos_hist[:, 2, :] = self._root_states[:, :3]
         self._ball_hist[:, 2, :] = self._ball_root_states[:, :3]
-        # states_idx = NUM_CURR_OBS * (self.history_steps + 1)
-        # print('goal: ', self.obs_buf[:, states_idx:states_idx + 2])
-        # print('xy: ', self._goal_xy)
-        # self.extras["success"] = self._success_buf
 
         # reset goal pos
         if self.rand_goal:
@@ -530,15 +547,7 @@ class A1DribblingFOV(A1AMP):
             self.initial_ball_pos[env_ids, 0] = torch.flatten(ball_dist * torch.cos(ball_rot)) + self._root_states[env_ids, 0]
             self.initial_ball_pos[env_ids, 1] = torch.flatten(ball_dist * torch.sin(ball_rot)) + self._root_states[env_ids, 1]
             self.initial_ball_pos[env_ids, 2] = self.height
-        # self.initial_ball_pos[env_ids, 0] = 2.4
-        # self.initial_ball_pos[env_ids, 1] = 0.6
-        # u = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device)
-        # v = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device)
-        # w = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device)
-        # self.initial_ball_pos[env_ids, 3] = torch.flatten(torch.sqrt_(1. - u) * torch.sin(v * torch.pi * 2))
-        # self.initial_ball_pos[env_ids, 4] = torch.flatten(torch.sqrt_(1. - u) * torch.cos(v * torch.pi * 2))
-        # self.initial_ball_pos[env_ids, 5] = torch.flatten(torch.sqrt_(u) * torch.sin(w * torch.pi * 2))
-        # self.initial_ball_pos[env_ids, 6] = torch.flatten(torch.sqrt_(u) * torch.cos(w * torch.pi * 2))
+
         self._ball_root_states[env_ids, :7] = self.initial_ball_pos[env_ids, :]
         self._ball_root_states[env_ids, 7:] = 0.
         if self.add_ball_delay:
@@ -557,8 +566,7 @@ class A1DribblingFOV(A1AMP):
             goal_rot = torch.rand((len(goal_reset_envs), 1), dtype=torch.float, device=self.device) * torch.pi * 2
             self._goal_pos[goal_reset_envs, 0] = torch.flatten(goal_dist * torch.cos(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 0]
             self._goal_pos[goal_reset_envs, 1] = torch.flatten(goal_dist * torch.sin(goal_rot)) + self.initial_ball_pos[goal_reset_envs, 1]
-        # self._goal_pos[goal_reset_envs, 0] = 3.6
-        # self._goal_pos[goal_reset_envs, 1] = 0.0
+
         if not self.headless:
             self._goal_root_states[goal_reset_envs, :3] = self._goal_pos[goal_reset_envs]
             if set_goal:
@@ -570,22 +578,22 @@ class A1DribblingFOV(A1AMP):
     
     def _reset_limited_ball_pos(self, env_ids=None):
         if env_ids == None:
-            self.initial_ball_pos[..., 0] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_length / 2 - 0.7)
-            self.initial_ball_pos[..., 1] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_width / 2 - 0.7)
+            self.initial_ball_pos[..., 0] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * SPACE_X)
+            self.initial_ball_pos[..., 1] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * SPACE_Y - SPACE_Y // 2)
             self.initial_ball_pos[..., 2] = self.height
         else:
-            self.initial_ball_pos[env_ids, 0] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_length / 2 - 0.7)
-            self.initial_ball_pos[env_ids, 1] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_width / 2 - 0.7)
+            self.initial_ball_pos[env_ids, 0] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * SPACE_X)
+            self.initial_ball_pos[env_ids, 1] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * SPACE_Y - SPACE_Y // 2)
             self.initial_ball_pos[env_ids, 2] = self.height
         return
 
     def _reset_limited_goal_pos(self, env_ids=None):
         if env_ids == None:
-            self._goal_pos[..., 0] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_length / 2 - 0.7)
-            self._goal_pos[..., 1] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_width / 2 - 0.7)
+            self._goal_pos[..., 0] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * SPACE_X)
+            self._goal_pos[..., 1] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * SPACE_Y - SPACE_Y // 2)
         else:
-            self._goal_pos[env_ids, 0] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_length / 2 - 0.7)
-            self._goal_pos[env_ids, 1] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 2 - 1) * (self.space_width / 2 - 0.7)
+            self._goal_pos[env_ids, 0] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * SPACE_X)
+            self._goal_pos[env_ids, 1] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * SPACE_Y - SPACE_Y // 2)
         return
 
     def _compute_observations(self, env_ids=None):
@@ -606,7 +614,7 @@ class A1DribblingFOV(A1AMP):
                                                                      self._goal_pos[:, :2], self._ball_root_states[:, :3], init_goal_dist, 
                                                                      self._pos_hist, self._ball_hist,
                                                                      self._root_states[:, :2],
-                                                                     self.limit_space, self.space_width, self.space_length)
+                                                                     self.limit_space, self._vertices_pos)
         return
 
 
@@ -786,16 +794,6 @@ def compute_a1_reward(
         "energy_rew": energy_reward
         }
 
-    # # override the reward to be the max if ball is close enough to ball
-    # reward = torch.where(dist < 0.2, torch.ones_like(reward), reward)
-    # total_reward = (1 - energy_weight) * reward + energy_weight * energy_reward
-
-    # test printouts
-    # print('total_rew: {}, rew:{}, dist_rew:{}, actor_dist_rew:{}, energy:{}, actor_vel:{}, ball_vel:{}'.format(
-    #     total_reward, reward, dist_reward, actor_dist_reward, energy_reward, actor_vel_reward, ball_vel_reward))
-
-
-
     return rewards
 
 
@@ -803,51 +801,18 @@ def compute_a1_reward(
 def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
                      max_episode_length, enable_early_termination, termination_height, goal, ball_pos, goal_dist,
                      pos_hist, ball_hist, robot_xy,
-                     limit_space, space_w, space_l):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor, float, Tensor, Tensor, Tensor, bool, float, float) -> Tuple[Tensor, Tensor]
+                     limit_space, vertices):
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor, float, Tensor, Tensor, Tensor, bool, Tensor) -> Tuple[Tensor, Tensor]
     terminated = torch.zeros_like(reset_buf)
-
-    # ball = ball_pos[:, :2]
-    # h = ball_pos[:, 2]
-    # bg_dist = (goal[:, 0] - ball[:, 0]) ** 2 + (goal[:, 1] - ball[:, 1]) ** 2
-    # success = torch.zeros_like(reset_buf)
-    # success = torch.where((bg_dist < 0.05) & (h <= 0.3), torch.ones_like(reset_buf), success)
-    # p1 = pos_hist[:, 0, :].squeeze(1)
-    # p2 = pos_hist[:, 1, :].squeeze(1)
-    # p3 = pos_hist[:, 2, :].squeeze(1)
-    # b1 = ball_hist[:, 0, :].squeeze(1)
-    # b2 = ball_hist[:, 1, :].squeeze(1)
-    # b3 = ball_hist[:, 2, :].squeeze(1)
-    # d1 = (p1[:, 0] - b1[:, 0]) ** 2 + (p1[:, 1] - b1[:, 1]) ** 2 + (p1[:, 2] - b1[:, 2]) ** 2
-    # d2 = (p2[:, 0] - b2[:, 0]) ** 2 + (p2[:, 1] - b2[:, 1]) ** 2 + (p2[:, 2] - b2[:, 2]) ** 2
-    # d3 = (p3[:, 0] - b3[:, 0]) ** 2 + (p3[:, 1] - b3[:, 1]) ** 2 + (p3[:, 2] - b3[:, 2]) ** 2
-    # v1 = (p2[:, 0] - p1[:, 0]) ** 2 + (p2[:, 1] - p1[:, 1]) ** 2 + (p2[:, 2] - p1[:, 2]) ** 2
-    # v2 = (p3[:, 0] - p2[:, 0]) ** 2 + (p3[:, 1] - p2[:, 1]) ** 2 + (p3[:, 2] - p2[:, 2]) ** 2
     fail = torch.zeros_like(reset_buf)
-    # fail = torch.where((bg_dist > goal_dist ** 2 + 2.0), torch.ones_like(reset_buf), fail)
-    # fail = torch.where(((v1 < 1e-5) & (v2 < 1e-5)), torch.ones_like(reset_buf), fail)
-    # fail = torch.where(
-    #     ((0.25 <= d1) & 
-    #      (d1 <= d2) & 
-    #      (d2 <= d3) & 
-    #      (b1[:, 0] == b2[:, 0]) & 
-    #      (b1[:, 1] == b2[:, 1]) & 
-    #      (b1[:, 2] == b2[:, 2]) & 
-    #      (b2[:, 0] == b3[:, 0]) & 
-    #      (b2[:, 1] == b3[:, 1]) &
-    #      (b2[:, 2] == b3[:, 2])), torch.ones_like(reset_buf), fail)
 
     ######### constrain space #########
     if limit_space:
-        limit = torch.zeros_like(ball_pos[0, :2])
-        limit[0], limit[1] = space_l, space_w
-        limit /= 2
-        limit -= 0.7
         out_of_space = (
-            (robot_xy[:, 0] > limit[0]) | (robot_xy[:, 1] < - limit[0]) |
-            (robot_xy[:, 1] > limit[1]) | (robot_xy[:, 1] < - limit[1]) |
-            (ball_pos[:, 0] > limit[0]) | (ball_pos[:, 0] < - limit[0]) |
-            (ball_pos[:, 1] > limit[1]) | (ball_pos[:, 1] < - limit[1])
+            (robot_xy[:, 0] > vertices[:, 4]) | (robot_xy[:, 1] < vertices[:, 0]) |
+            (robot_xy[:, 1] > vertices[:, 3]) | (robot_xy[:, 1] < vertices[:, 1]) |
+            (ball_pos[:, 0] > vertices[:, 4]) | (ball_pos[:, 0] < vertices[:, 0]) |
+            (ball_pos[:, 1] > vertices[:, 3]) | (ball_pos[:, 1] < vertices[:, 1])
             ) 
         fail = torch.where(out_of_space, torch.ones_like(reset_buf), fail)
 
