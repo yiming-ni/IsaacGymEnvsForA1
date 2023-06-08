@@ -23,9 +23,10 @@ GLOBAL_POS_OBS = 2
 BALL_RAD = 0.1
 init_goal_dist = 7.0
 OBJECT = ['sphere', 'box']
-SPACE_VERTICES = [0, -3, 0, 3, 6, -3, 6, 3]
+SPACE_VERTICES = [-0.2, -3, -0.2, 3, 6, -3, 6, 3]
 SPACE_X = SPACE_VERTICES[4] - SPACE_VERTICES[0]
 SPACE_Y = SPACE_VERTICES[3] - SPACE_VERTICES[1]
+max_ball_dist = 3.0
 
 
 class A1DribblingFOV(A1AMP):
@@ -39,6 +40,7 @@ class A1DribblingFOV(A1AMP):
         self.space_width, self.space_length = cfg['env']['plane']['width'], cfg['env']['plane']['length']
         self.height = BALL_RAD
         self.ball_rad = cfg['task']['ball_size']
+
         super().__init__(cfg, sim_device, graphics_device_id, headless)
         # track goal progress
         self.goal_terminate = torch.randint(self.max_episode_length // 2, self.max_episode_length, (self.num_envs,), device=self.device, dtype=torch.int32)
@@ -58,14 +60,12 @@ class A1DribblingFOV(A1AMP):
         self.goal_reset = self.cfg["task"]["goal_reset_freq_inv"]
         self.goal_reset_upper_inv = self.cfg["task"]["goal_reset_freq_inv_upper"]
         self.rand_goal = self.cfg["task"]["randomize_goal"]
-
         # init fov
         self.fov = torch.zeros((4,), device=self.device, dtype=torch.float)
         self.fov[0] = 0.25
-        self.fov[1] = 6.0
-        self.fov[2] = 1.732
+        self.fov[1] = max_ball_dist
+        self.fov[2] = np.tan(75/180*np.pi)  # tan(1/2*pi-rad)
         self.fov[-1] = 0.3
-
         # init local_ball_pos_prev
         self.local_ball_pos_prev = torch.zeros((self.num_envs, 3), device=self.device, dtype=torch.float)
 
@@ -249,7 +249,7 @@ class A1DribblingFOV(A1AMP):
         if self.limit_space:
             self._reset_limited_ball_pos()
         else:
-            _ball_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * 3.0
+            _ball_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * max_ball_dist
             _ball_angle = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * torch.pi * 2
             self.initial_ball_pos[..., 0] = torch.flatten(_ball_dist * torch.cos(_ball_angle))
             self.initial_ball_pos[..., 1] = torch.flatten(_ball_dist * torch.sin(_ball_angle))
@@ -389,9 +389,8 @@ class A1DribblingFOV(A1AMP):
                                             self.ball_vel_scale,
                                             self.energy_scale,
                                             self.energy_weight,
-                                            self.ab_dist_threshold,
-                                            self.piecewise,
-                                            is_additive,
+                                            self.limit_space,
+                                            self._vertices_pos
                                             )
         self.rew_buf[:] = rew_dict["total_rew"]
         return rew_dict
@@ -542,7 +541,7 @@ class A1DribblingFOV(A1AMP):
         if self.limit_space:
             self._reset_limited_ball_pos(env_ids)
         else:
-            ball_dist = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * 6.0
+            ball_dist = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * max_ball_dist
             ball_rot = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * torch.pi * 2
             self.initial_ball_pos[env_ids, 0] = torch.flatten(ball_dist * torch.cos(ball_rot)) + self._root_states[env_ids, 0]
             self.initial_ball_pos[env_ids, 1] = torch.flatten(ball_dist * torch.sin(ball_rot)) + self._root_states[env_ids, 1]
@@ -577,13 +576,17 @@ class A1DribblingFOV(A1AMP):
         return
     
     def _reset_limited_ball_pos(self, env_ids=None):
-        if env_ids == None:
-            self.initial_ball_pos[..., 0] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * SPACE_X)
-            self.initial_ball_pos[..., 1] = torch.flatten(torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * SPACE_Y - SPACE_Y // 2)
-            self.initial_ball_pos[..., 2] = self.height
+        if env_ids==None:
+            ball_dist = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * max_ball_dist
+            ball_rot = torch.rand((self.num_envs, 1), dtype=torch.float, device=self.device) * torch.pi
+            self.initial_ball_pos[:, 0] = torch.flatten(ball_dist * torch.cos(ball_rot))
+            self.initial_ball_pos[:, 1] = torch.flatten(ball_dist * torch.sin(ball_rot))
+            self.initial_ball_pos[:, 2] = self.height
         else:
-            self.initial_ball_pos[env_ids, 0] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * SPACE_X)
-            self.initial_ball_pos[env_ids, 1] = torch.flatten(torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * SPACE_Y - SPACE_Y // 2)
+            ball_dist = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * max_ball_dist
+            ball_rot = torch.rand((len(env_ids), 1), dtype=torch.float, device=self.device) * torch.pi
+            self.initial_ball_pos[env_ids, 0] = torch.flatten(ball_dist * torch.cos(ball_rot))
+            self.initial_ball_pos[env_ids, 1] = torch.flatten(ball_dist * torch.sin(ball_rot))
             self.initial_ball_pos[env_ids, 2] = self.height
         return
 
@@ -613,8 +616,7 @@ class A1DribblingFOV(A1AMP):
                                                                      self._termination_height,
                                                                      self._goal_pos[:, :2], self._ball_root_states[:, :3], init_goal_dist, 
                                                                      self._pos_hist, self._ball_hist,
-                                                                     self._root_states[:, :2],
-                                                                     self.limit_space, self._vertices_pos)
+                                                                     self._root_states[:, :2])
         return
 
 
@@ -716,8 +718,8 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
 @torch.jit.script
 def compute_a1_reward(
     root_states, prev_root_xy, goal_xy, ball_xy, prev_ball_xy, blind, dt, torque,
-    dof_vel, actor_vel_scale, ball_vel_scale, energy_scale, energy_weight, ab_dist_threshold, piecewise, additive):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, float, Tensor, Tensor, float, float, float, float, float, bool, bool) -> Dict[str, Tensor]
+    dof_vel, actor_vel_scale, ball_vel_scale, energy_scale, energy_weight, limit_space, vertices):
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, float, Tensor, Tensor, float, float, float, float, bool, Tensor) -> Dict[str, Tensor]
 
     root_xy = root_states[:, :2]
     # energy saving reward
@@ -746,53 +748,29 @@ def compute_a1_reward(
     actor_vel_static = tolerance(actor_vel, 0., 0., 0.1)
     actor_vel_move = tolerance(actor_vel, 0.5, 1., 1.)
 
-    if additive:
-        ball_vel_static = torch.where(dist<0.2, ball_vel_static, torch.zeros_like(ball_vel_static))
-        ball_vel_move = torch.where(dist<0.2, torch.ones_like(ball_vel_move), ball_vel_move)
-        actor_vel_static = torch.where(dist<0.2, torch.ones_like(actor_vel_static), torch.where(dist_b<0.2, actor_vel_static, torch.zeros_like(actor_vel_static)))
-        actor_vel_move = torch.where(dist<0.2, torch.ones_like(actor_vel_move), torch.where(dist_b<0.2, torch.ones_like(actor_vel_move), actor_vel_move))
-        reward = 0.1 * actor_vel_static + 0.1 * actor_vel_move + 0.4 * ball_vel_static + 0.4 * ball_vel_move
-        total_reward = (1 - energy_weight) * reward + energy_weight * energy_reward
-        total_reward = torch.where(blind == 1.0, torch.zeros_like(total_reward), total_reward)
-        rewards = {
-        "actor_dist/static_rew": actor_vel_static,
-        "actor_move_rew": actor_vel_move,
-        "ball_dist/static_rew": ball_vel_static,
-        "ball_move_rew": ball_vel_move,
-        "total_rew": total_reward,
-        "energy_rew": energy_reward
-        }
-
-    else:
-        # using distance and velocity reward
-        actor_dist_reward = torch.exp(- dist_b ** 2 * 0.5)
-
-        actor_vel_reward = torch.exp(
-            - actor_vel_scale * torch.maximum(torch.zeros_like(v1_char),
-                            0.5 - actor_vel) ** 2)
-
-        dist_reward = torch.exp(- dist ** 2 * 0.5)
-
-        ball_vel_reward = torch.exp(
-            - ball_vel_scale * torch.maximum(torch.zeros_like(v1_ball),
-                            0.5 - ball_vel) ** 2)
-
-        if piecewise:
-            ball_vel_reward = torch.where(dist_b > ab_dist_threshold, torch.zeros_like(ball_vel_reward), ball_vel_reward)
-            dist_reward = torch.where(dist_b > ab_dist_threshold, torch.zeros_like(dist_reward), dist_reward)
-
-        reward = 0.1 * actor_vel_reward + 0.1 * actor_dist_reward + 0.3 * ball_vel_reward + 0.5 * dist_reward
-        total_reward = (1 - energy_weight) * reward + energy_weight * energy_reward
-        total_reward = torch.where(dist < 0.2, torch.ones_like(total_reward), total_reward)
-        total_reward = torch.where(blind == 1.0, torch.zeros_like(total_reward), total_reward)
-        rewards = {
-        "actor_dist/static_rew": actor_dist_reward,
-        "actor_move_rew": actor_vel_reward,
-        "ball_dist/static_rew": dist_reward,
-        "ball_move_rew": ball_vel_reward,
-        "total_rew": total_reward,
-        "energy_rew": energy_reward
-        }
+    ball_vel_static = torch.where(dist<0.2, ball_vel_static, torch.zeros_like(ball_vel_static))
+    ball_vel_move = torch.where(dist<0.2, torch.ones_like(ball_vel_move), ball_vel_move)
+    actor_vel_static = torch.where(dist<0.2, torch.ones_like(actor_vel_static), torch.where(dist_b<0.2, actor_vel_static, torch.zeros_like(actor_vel_static)))
+    actor_vel_move = torch.where(dist<0.2, torch.ones_like(actor_vel_move), torch.where(dist_b<0.2, torch.ones_like(actor_vel_move), actor_vel_move))
+    reward = 0.1 * actor_vel_static + 0.1 * actor_vel_move + 0.4 * ball_vel_static + 0.4 * ball_vel_move
+    total_reward = (1 - energy_weight) * reward + energy_weight * energy_reward
+    total_reward = torch.where(blind == 1.0, torch.zeros_like(total_reward), total_reward)
+    if limit_space:
+        out_of_space = (
+            (root_xy[:, 0] > vertices[:, 4]) | (root_xy[:, 1] < vertices[:, 0]) |
+            (root_xy[:, 1] > vertices[:, 3]) | (root_xy[:, 1] < vertices[:, 1]) |
+            (ball_xy[:, 0] > vertices[:, 4]) | (ball_xy[:, 0] < vertices[:, 0]) |
+            (ball_xy[:, 1] > vertices[:, 3]) | (ball_xy[:, 1] < vertices[:, 1])
+            ) 
+        total_reward = torch.where(out_of_space, torch.zeros_like(total_reward), total_reward)
+    rewards = {
+    "actor_dist/static_rew": actor_vel_static,
+    "actor_move_rew": actor_vel_move,
+    "ball_dist/static_rew": ball_vel_static,
+    "ball_move_rew": ball_vel_move,
+    "total_rew": total_reward,
+    "energy_rew": energy_reward
+    }
 
     return rewards
 
@@ -800,21 +778,9 @@ def compute_a1_reward(
 @torch.jit.script
 def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rigid_body_pos,
                      max_episode_length, enable_early_termination, termination_height, goal, ball_pos, goal_dist,
-                     pos_hist, ball_hist, robot_xy,
-                     limit_space, vertices):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor, float, Tensor, Tensor, Tensor, bool, Tensor) -> Tuple[Tensor, Tensor]
+                     pos_hist, ball_hist, robot_xy):
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, bool, float, Tensor, Tensor, float, Tensor, Tensor, Tensor) -> Tuple[Tensor, Tensor]
     terminated = torch.zeros_like(reset_buf)
-    fail = torch.zeros_like(reset_buf)
-
-    ######### constrain space #########
-    if limit_space:
-        out_of_space = (
-            (robot_xy[:, 0] > vertices[:, 4]) | (robot_xy[:, 1] < vertices[:, 0]) |
-            (robot_xy[:, 1] > vertices[:, 3]) | (robot_xy[:, 1] < vertices[:, 1]) |
-            (ball_pos[:, 0] > vertices[:, 4]) | (ball_pos[:, 0] < vertices[:, 0]) |
-            (ball_pos[:, 1] > vertices[:, 3]) | (ball_pos[:, 1] < vertices[:, 1])
-            ) 
-        fail = torch.where(out_of_space, torch.ones_like(reset_buf), fail)
 
     if (enable_early_termination):
         masked_contact_buf = contact_buf.clone()
@@ -834,7 +800,6 @@ def compute_a1_reset(reset_buf, progress_buf, contact_buf, contact_body_ids, rig
         has_fallen *= (progress_buf > 1)
         terminated = torch.where(has_fallen, torch.ones_like(reset_buf), terminated)
         # terminated = torch.where(success == 1., success, terminated)
-        terminated = torch.where(fail == 1., fail, terminated)
 
     reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), terminated)
 
