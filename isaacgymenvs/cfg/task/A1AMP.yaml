@@ -42,8 +42,7 @@ env:
     dynamicFriction: 1.0
     restitution: 0.0
     limit_space: false
-    width: 6.0
-    length: 9.0
+    ball_dist: 2.5
 
 control:
   control_type: 'P'

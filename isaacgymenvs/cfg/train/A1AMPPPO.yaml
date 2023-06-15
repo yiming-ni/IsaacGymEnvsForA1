@@ -76,7 +76,7 @@ params:
     e_clip: 0.2
     horizon_length: 16
     minibatch_size: 32768
-    mini_epochs: 3
+    mini_epochs: 6
     critic_coef: 5
     clip_value: False
     seq_len: 4
@@ -88,12 +88,12 @@ params:
     amp_minibatch_size: 4096
     disc_coef: 5
     disc_logit_reg: 0.05
-    disc_grad_penalty: 2
+    disc_grad_penalty: 0.8
     disc_reward_scale: 2
     disc_weight_decay: 0.0001
     normalize_amp_input: True
 
-    task_reward_w: 0.5
-    disc_reward_w: 0.5
+    task_reward_w: 0.7
+    disc_reward_w: 0.3
 
     reward_as_dict: True
