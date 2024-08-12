@@ -65,7 +65,7 @@ class A1AMP(A1Base):
         return
 
     def post_physics_step(self):
-        super().post_physics_step()
+        rew_dict = super().post_physics_step()
         
         self._update_hist_amp_obs()
         self._compute_amp_observations()
@@ -73,7 +73,7 @@ class A1AMP(A1Base):
         amp_obs_flat = self._amp_obs_buf.view(-1, self.get_num_amp_obs())
         self.extras["amp_obs"] = amp_obs_flat
 
-        return
+        return rew_dict
 
     def get_num_amp_obs(self):
         return self.num_amp_obs
@@ -165,6 +165,16 @@ class A1AMP(A1Base):
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 0
         self._terminate_buf[env_ids] = 0
+
+        # initial_force = torch.zeros((self.num_envs, self.num_dof), device=self.device)
+        # self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(initial_force))
+        # forces = torch.zeros((self.num_envs, self._all_actor_rb_states.shape[1], 3), device=self.device,
+        #                      dtype=torch.float)
+        # torques = torch.zeros((self.num_envs, self._all_actor_rb_states.shape[1], 3), device=self.device,
+        #                       dtype=torch.float)
+        # self.gym.apply_rigid_body_force_tensors(self.sim, gymtorch.unwrap_tensor(forces),
+        #                                         gymtorch.unwrap_tensor(torques), gymapi.GLOBAL_SPACE)
+
 
         return
     
@@ -269,26 +279,11 @@ class A1AMP(A1Base):
         self._dof_pos[env_ids] = dof_pos
         self._dof_vel[env_ids] = dof_vel
 
-
-
-        if self.add_markers:
-            actor_indices = self.all_actor_indices[env_ids, 0].flatten()
-            self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
-                                                        gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
-            self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
-                                                        gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
-        elif not self.headless:
-            actor_indices = self.all_actor_indices[env_ids, 0].flatten()
-            self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_actor_root_states),
-                                                         gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
-            self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
-                                                  gymtorch.unwrap_tensor(actor_indices), len(actor_indices))
-        else:
-            env_ids_int32 = env_ids.to(dtype=torch.int32)
-            self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._root_states),
-                                                         gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
-            self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
-                                                  gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+        env_ids_int32 = env_ids.to(dtype=torch.int32)
+        self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._root_states),
+                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+        self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._dof_state),
+                                              gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
         return
 
     def _update_hist_amp_obs(self, env_ids=None):

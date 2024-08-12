@@ -1,6 +1,5 @@
-motions: [{"file": "a1_canter.json", "weight": 1.},
-          {"file" : "a1_leftturn0.json", "weight": 1.},
-          {"file": "a1_rightturn0.json", "weight": 1.},
+motions: [
+          {"file": "a1_canter.json", "weight": 1.},
           {"file": "a1_run00.json", "weight": 1.},
           {"file": "a1_run01.json", "weight": 1.},
           {"file": "a1_run02.json", "weight": 1.},
@@ -8,11 +7,17 @@ motions: [{"file": "a1_canter.json", "weight": 1.},
           {"file": "a1_trot.json", "weight": 1.},
           {"file": "a1_trot2.json", "weight": 1.},
           {"file": "a1_turn.json", "weight": 1.},
+          {"file": "a1_turn_mirror.json", "weight": 1.},
           {"file": "a1_walk00.json", "weight": 1.},
-          {"file": "a1_walk01.json", "weight": 1.},
+          {"file": "a1_walk01.json", "weight": 1.}, 
           {"file": "a1_walk02.json", "weight": 1.},
           {"file": "a1_walk04.json", "weight": 1.},
           {"file": "a1_walk05.json", "weight": 1.},
           {"file": "a1_walk06.json", "weight": 1.},
-          {"file": "a1_walk09.json", "weight": 1.}
+          {"file": "a1_walk09.json", "weight": 1.},
+          {"file": "a1_walk09_mirror.json", "weight": 1.},
+          {"file" : "a1_leftturn0.json", "weight": 1.},
+          {"file" : "a1_leftturn0_mirror.json", "weight": 1.},
+          {"file" : "a1_rightturn0.json", "weight": 1.},
+          {"file" : "a1_rightturn0_mirror.json", "weight": 1.}
 ]

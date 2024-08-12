@@ -21,7 +21,7 @@ params:
           b: 0.01
         sigma_init:
           name: const_initializer
-          val: -3.2
+          val: -3
         fixed_sigma: True
         learn_sigma: False
 
@@ -46,6 +46,7 @@ params:
   load_path: ${...checkpoint} # path to the checkpoint to load
 
   config:
+    device: ${....rl_device}
     name: ${resolve_default:A1AMP,${....experiment}}
     full_experiment_name: ${.name}
     env_name: rlgpu
@@ -61,7 +62,7 @@ params:
     normalize_advantage: True
     gamma: 0.99
     tau: 0.95
-    learning_rate: 0.001  #5e-5
+    learning_rate: 0.0001  #5e-5
     lr_schedule: constant
     kl_threshold: 0.008
     score_to_win: 20000
@@ -87,10 +88,12 @@ params:
     amp_minibatch_size: 4096
     disc_coef: 5
     disc_logit_reg: 0.05
-    disc_grad_penalty: 2
+    disc_grad_penalty: 0.8
     disc_reward_scale: 2
     disc_weight_decay: 0.0001
     normalize_amp_input: True
 
-    task_reward_w: 0.5
-    disc_reward_w: 0.5
+    task_reward_w: 0.7
+    disc_reward_w: 0.3
+
+    reward_as_dict: True

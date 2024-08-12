@@ -38,13 +38,15 @@ from isaacgym.torch_utils import *
 
 from isaacgymenvs.utils.torch_jit_utils import *
 from ..base.vec_task import VecTask
+from ..base.base_utils.action_filter import ActionFilterButter
+from ..base.base_utils.communication_blocker import CommunicationBlocker
 # from tensorboardX import SummaryWriter
 
 DOF_BODY_IDS = [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15]
 DOF_OFFSETS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 NUM_CURR_OBS = 18
 NUM_ACTIONS = 12
-NUM_OBS = (NUM_CURR_OBS + NUM_ACTIONS) * 15 + NUM_CURR_OBS  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
+# NUM_OBS = (NUM_CURR_OBS + NUM_ACTIONS) * 15 + NUM_CURR_OBS  # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
 # base_height, base_orientation=4, base_angular_vel=3, joint_pos=12, joint_velocity=12
 # orientation, joint_pos, 4+12+history
 
@@ -79,14 +81,13 @@ class A1Base(VecTask):
         self._contact_bodies = self.cfg["env"]["contactBodies"]
         self._termination_height = self.cfg["env"]["terminationHeight"]
         self._enable_early_termination = self.cfg["env"]["enableEarlyTermination"]
+        self.history_steps = self.cfg["env"].get("historySteps", None)
+        self.history_num_obs = (NUM_CURR_OBS + NUM_ACTIONS) * self.history_steps + NUM_CURR_OBS
 
         self.cfg["env"]["numObservations"] = self.get_obs_size()
         self.cfg["env"]["numActions"] = self.get_action_size()
         self.priv_obs = self.cfg['env'].get('priv_obs', False)
 
-
-        # add marker if true
-        self.add_markers = self.cfg["env"].get("addMarkers", False)
         # initialize domain randomization
         self.domain_rand = self.cfg["task"].get("domain_rand", None)
         if self.domain_rand:
@@ -95,11 +96,10 @@ class A1Base(VecTask):
             self.dr_joint_friction = self.domain_rand["randomize_joint_friction"]
             self.dr_base_mass = self.domain_rand["randomize_base_mass"]
             self.dr_pd = self.domain_rand["randomize_PD"]
+            self.dr_init_dof = self.domain_rand["randomize_initial_dof_pos"]
 
         super().__init__(config=self.cfg, sim_device=sim_device, graphics_device_id=graphics_device_id,
                          headless=headless)
-
-        self.history_steps = self.cfg["env"].get("historySteps", None)
 
         dt = self.cfg["sim"]["dt"]
         self.dt = self.control_freq_inv * dt
@@ -122,26 +122,12 @@ class A1Base(VecTask):
         self.gym.refresh_rigid_body_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
 
-        if self.add_markers:
-            self.all_actor_indices = torch.arange(self.num_envs * (self.num_markers+1), dtype=torch.int32, device=self.device).reshape(
-                (self.num_envs, (self.num_markers+1)))  # TODO root_states
-            self._all_actor_root_states = gymtorch.wrap_tensor(actor_root_state)
-            self._root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 0, :]
-            self._marker_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 1:, :]
-        elif not self.headless:
-            self.all_actor_indices = torch.arange(self.num_envs * (self.num_markers+1), dtype=torch.int32, device=self.device).reshape(
-                (self.num_envs, (self.num_markers+1))
-            )
-            self._all_actor_root_states = gymtorch.wrap_tensor(actor_root_state)
-            self._root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 0, :]
-            self._goal_root_states = self._all_actor_root_states.view(self.num_envs, self.num_markers+1, self.num_dof+1)[..., 1, :]
-        else:
-            self._root_states = gymtorch.wrap_tensor(actor_root_state)
+        self._get_root_states_from_tensor(actor_root_state)
 
         # self._root_states = gymtorch.wrap_tensor(actor_root_state)
         self._initial_root_states = self._root_states.clone()
         self._initial_root_states[:] = 0
-        self._initial_root_states[..., 2] = 0.28
+        self._initial_root_states[..., 2] = 0.305
         self._initial_root_states[..., 6] = 1
         self._prev_root_states = self._root_states.clone()
 
@@ -160,8 +146,6 @@ class A1Base(VecTask):
 
         self.torques = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device,
                                    requires_grad=False)
-        self.init_p_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
-        self.init_d_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.p_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.d_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.last_dof_vel = torch.zeros_like(self._dof_vel)
@@ -197,7 +181,21 @@ class A1Base(VecTask):
         self._rigid_body_ang_vel = self._rigid_body_state.view(self.num_envs, self.num_bodies+self.num_markers, 13)[:, :self.num_bodies, 10:13]
         self._contact_forces = gymtorch.wrap_tensor(contact_force_tensor).view(self.num_envs, self.num_bodies+self.num_markers, 3)
 
+        self.include_af = self.cfg["task"].get("action_filter", False)
+        if self.include_af:
+            self.action_filter = ActionFilterButter(lowcut=None, highcut=[4], sampling_rate=1. / self.dt, order=2,
+                                                    num_joints=12, device=self.device, num_envs=self.num_envs)
+
+        if self.domain_rand and self.dr_push_robot:
+            self.perturbation_enabled_episodes = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device,
+                                                             requires_grad=False)
+            self.perturbation_time = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
+                                                 requires_grad=False)
+            self.perturbation_forces = torch.zeros((self.num_envs, 1, 3), device=self.device, dtype=torch.float)
+            self.perturbation_torques = torch.zeros((self.num_envs, 1, 3), device=self.device, dtype=torch.float)
+
         self.actions = torch.zeros((self.num_envs, self.num_actions), device=self.device)
+        self.pd_tars = torch.zeros_like(self.actions)
 
         self.add_delay = self.cfg["task"]["noise"]["add_delay"]
         if self.add_delay:
@@ -217,8 +215,8 @@ class A1Base(VecTask):
 
         self._terminate_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
         # track goal progress
-        self.goal_terminate = torch.randint(100, 200, (self.num_envs,), device=self.device, dtype=torch.int32)
-        self.goal_step = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
+        # self.goal_terminate = torch.randint(100, 200, (self.num_envs,), device=self.device, dtype=torch.int32)
+        # self.goal_step = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
 
         if self.viewer != None:
             self._init_camera()
@@ -258,7 +256,6 @@ class A1Base(VecTask):
         Returns:
             [torch.Tensor]: Vector of scales used to multiply a uniform distribution in [-1, 1]
         """
-        noise_vec = torch.zeros(self.num_obs, dtype=torch.float, device=self.device)
         noise_scales = self.cfg["task"]["noise"]["noise_scales"]
         noise_level = self.cfg["task"]["noise"]["noise_level"]
         # TODO change for actual obs
@@ -280,7 +277,9 @@ class A1Base(VecTask):
         return self.p_gains * scaler, self.d_gains * scaler
 
     def get_obs_size(self):
-        return NUM_OBS
+        if self.history_steps is None:
+            return 1 + 6 + 3 + 3 + 12 + 12 + 4*3  # full state obs
+        return self.history_num_obs
 
     def get_action_size(self):
         return NUM_ACTIONS
@@ -315,9 +314,9 @@ class A1Base(VecTask):
                 num_buckets = 64
                 bucket_ids = torch.randint(0, num_buckets, (self.num_envs, 1))
                 friction_buckets = torch_rand_float(friction_range[0], friction_range[1], (num_buckets, 1),
-                                                    device='cpu')
+                                                    device=self.device)
                 self.friction_coeffs = friction_buckets[bucket_ids]
-                rolling_friction_buckets = torch_rand_float(0, 1e-4, (num_buckets, 1), device='cpu')
+                rolling_friction_buckets = torch_rand_float(0, 1e-4, (num_buckets, 1), device=self.device)
                 self.rolling_friction_coeffs = rolling_friction_buckets[bucket_ids]
                 self.all_friction_coeffs = torch.cat([self.friction_coeffs, self.rolling_friction_coeffs], dim=-1).to(
                     self.device)
@@ -325,6 +324,8 @@ class A1Base(VecTask):
             for s in range(len(props)):
                 props[s].friction = self.friction_coeffs[env_id]
                 props[s].rolling_friction = self.rolling_friction_coeffs[env_id]
+                # props[s].torsion_friction = 0
+                # props[s].restitution = self.friction_coeffs[env_id]
 
         return props
 
@@ -358,8 +359,8 @@ class A1Base(VecTask):
                 self.torque_limits[i] *= \
                     self.cfg["task"]["randomization_params"]["actor_params"]["a1"]["dof_properties"][
                         "soft_dof_torque_limit"]
-                if self.dr_joint_friction:
-                    props["friction"][i] = np.abs(np.random.normal(0, self.cfg["task"]["domain_rand"]["joint_friction_std"]))
+                if self.domain_rand and self.dr_joint_friction:
+                    props["friction"][i] = np.abs(np.random.normal(0, self.domain_rand["joint_friction_std"]))
         return props
 
     def _process_rigid_body_props(self, props, env_id):
@@ -388,7 +389,11 @@ class A1Base(VecTask):
             self._reset_pd_gains(env_ids)
         self._refresh_sim_tensors()
         self._compute_observations(env_ids)
-        self._reset_obs(env_ids)
+        if self.history_steps is not None:
+            self._reset_obs(env_ids)
+        self._reset_robot(env_ids)
+        if self.domain_rand and self.dr_push_robot:
+            self._reset_push(env_ids)
         return
 
     def _reset_pd_gains(self, env_ids):
@@ -419,6 +424,30 @@ class A1Base(VecTask):
         plane_params.restitution = self.plane_restitution
         # plane_params.distance = 2  #TODO only for testing ref
         self.gym.add_ground(self.sim, plane_params)
+
+        # self.top = 9
+        # mesh_vertices = np.array([
+        #     [-10, -10, self.top + .2],
+        #     [-10, 10, 0.2],
+        #     [10, -10, 0.2],
+        #     [10, 10, 0.2]]).astype(np.float32)
+        # mesh_triangles = np.array([
+        #     [1, 2, 3],
+        #     [0, 2, 3],
+        #     [0, 1, 3],
+        #     ]).astype(np.uint32)
+        # tm_params = gymapi.TriangleMeshParams()
+        # tm_params.nb_vertices = mesh_vertices.shape[0]
+        # tm_params.nb_triangles = mesh_triangles.shape[0]
+        # tm_params.transform.p.x = 0.0
+        # tm_params.transform.p.y = 0.0
+        # tm_params.transform.p.z = 0.0
+        # tm_params.static_friction = self.plane_static_friction
+        # tm_params.dynamic_friction = 0
+        # tm_params.restitution = self.plane_restitution
+        # self.gym.add_triangle_mesh(self.sim, mesh_vertices.flatten(order='C'),
+        #                         mesh_triangles.flatten(order='C'),
+        #                         tm_params)
         return
 
     def _create_envs(self, num_envs, spacing, num_per_row):
@@ -491,7 +520,7 @@ class A1Base(VecTask):
         # start_pose.p = gymapi.Vec3(*get_axis_params(0.89, self.up_axis_idx))
         # start_pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
 
-        pos = [0.0, 0.0, 0.28]
+        pos = [0.0, 0.0, 0.3]
         rot = [0.0, 0.0, 0.0, 1.0]
         lin_vel = [0.0, 0.0, 0.0]
         ang_vel = [0.0, 0.0, 0.0]
@@ -525,27 +554,12 @@ class A1Base(VecTask):
                 self.sim, lower, upper, num_per_row
             )
 
-            # pos = self.env_origins[i].clone()
-            # pos[:2] += torch_rand_float(-1., 1., (2, 1), device=self.device).squeeze(1)
-            # start_pose.p = gymapi.Vec3(*pos)
-
-            contact_filter = 0
-            handle = self.gym.create_actor(env_ptr, a1_asset, start_pose, "a1", i, contact_filter, 0)
-
-            if not self.headless:
-
-                init_goal_pos.p.x = self._goal_pos[i, 0]
-                init_goal_pos.p.y = self._goal_pos[i, 1]
-                init_goal_pos.p.z = 0.2
-                goal_handle = self.gym.create_actor(env_ptr, goal_asset, init_goal_pos, "goal", i, 1, 0)
-                self.gym.set_rigid_body_color(env_ptr, goal_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(1, 0, 0))
-
-            # create markers
-            self._create_marker_actors(env_ptr, marker_asset, marker_pos, i)
-
-            # TODO below for computing torque limits
             rigid_shape_props = self._process_rigid_shape_props(rigid_shape_props_asset, i)  # friction
             self.gym.set_asset_rigid_shape_properties(a1_asset, rigid_shape_props)
+
+            handle = self.gym.create_actor(env_ptr, a1_asset, start_pose, "a1", i, 0, 0)
+            self._create_marker_actors(env_ptr, marker_asset, marker_pos, i)
+
             dof_props = self._process_dof_props(dof_props_asset, i)
             self.gym.set_actor_dof_properties(env_ptr, handle, dof_props)
             body_props = self.gym.get_actor_rigid_body_properties(env_ptr, handle)
@@ -634,7 +648,7 @@ class A1Base(VecTask):
         return
 
     def _compute_reward(self, actions):
-        self.rew_buf[:] = compute_a1_reward(self._root_states[:, :2], self._goal_pos)
+        self.rew_buf[:] = compute_a1_reward(self.obs_buf)
         return
 
     def _compute_reset(self):
@@ -663,14 +677,11 @@ class A1Base(VecTask):
         if self.add_noise:
             ob_curr += torch.rand_like(ob_curr) * self.noise_scale_vec
 
-        if (env_ids is None):
-            if self.add_delay:
-                ob_curr = self.obs_state_blocker.send_msg(ob_curr)
-            # self.obs_buf[:] = self.obs
-            self._states_history[:] = self._states_history.roll(-1, 1)
-            self._actions_history[:] = self._actions_history.roll(-1, 1)
-            self._states_history[:, -1, :] = ob_curr
-            self._actions_history[:, -1, :] = self.actions
+        if self.history_steps is None:
+            if (env_ids is None):
+                self.obs_buf[:] = ob_curr
+            else:
+                self.obs_buf[env_ids] = ob_curr
         else:
             if (env_ids is None):
                 self._states_history[:] = self._states_history.roll(-1, 1)
@@ -766,8 +777,9 @@ class A1Base(VecTask):
         return
 
     def _reset_robot(self, env_ids):
+        start_dof_pos = self._dof_pos[env_ids]
+        self.pd_tars[env_ids] = start_dof_pos
         if self.include_af:
-            start_dof_pos = self._dof_pos[env_ids]
             self.action_filter.reset(env_ids, start_dof_pos)
         if self.add_delay:
             self.action_blocker.reset(env_ids)
@@ -855,11 +867,12 @@ class A1Base(VecTask):
 
                 # TODO this way amp will get delayed obs
 
+        # fill time out buffer
         self.timeout_buf = torch.where(self.progress_buf >= self.max_episode_length - 1,
                                        torch.ones_like(self.timeout_buf), torch.zeros_like(self.timeout_buf))
 
         # compute observations, rewards, resets, ...
-        self.post_physics_step()
+        rew_dict = self.post_physics_step()
 
         # randomize observations
         if self.dr_randomizations.get('observations', None):
@@ -875,6 +888,8 @@ class A1Base(VecTask):
 
         if self.num_states > 0:
             self.obs_dict["states"] = self.get_state()
+        
+        self.extras.update(rew_dict)
 
         return self.obs_dict, self.rew_buf.to(self.rl_device), self.reset_buf.to(self.rl_device), self.extras
 
@@ -894,29 +909,22 @@ class A1Base(VecTask):
         return
 
     def post_physics_step(self):
-        self.goal_step += 1
         self.progress_buf += 1
 
         self._refresh_sim_tensors()
         if self.dr_push_robot:
             self._push_robots()
         self._compute_observations()
-        self._compute_reward(self.actions)
+        rew_dict = self._compute_reward(self.actions)
         self._compute_reset()
 
         self.extras["terminate"] = self._terminate_buf
-
-        # reset goal pos
-        goal_reset_envs = (self.goal_step >= self.goal_terminate).nonzero(as_tuple=False).flatten()
-        if len(goal_reset_envs) > 0:
-            # print('reset encountered!')
-            self._reset_goal_pos(goal_reset_envs)
 
         # debug viz
         if self.viewer and self.debug_viz:
             self._update_debug_viz()
 
-        return
+        return rew_dict
 
     def _push_robots(self):
         """ Randomly pushes the robots. Emulates an impulse by setting a randomized base velocity.
@@ -969,11 +977,11 @@ class A1Base(VecTask):
 
     def _action_to_pd_targets(self, action):
         pd_tar = self._pd_action_offset + self._pd_action_scale * action
+        # high = self.pd_tars + 0.2
+        # low = self.pd_tars - 0.2
+        # pd_tar = torch.clip(pd_tar, low, high)
+        # self.pd_tars[...] = pd_tar[...]
         return pd_tar
-
-    def _pd_target_to_action(self, pd_tar):
-        action = (pd_tar - self._pd_action_offset) / self._pd_action_scale
-        return action
 
     def _init_camera(self):
         self.gym.refresh_actor_root_state_tensor(self.sim)
@@ -1047,8 +1055,8 @@ def dof_to_obs(pose):
 
 
 @torch.jit.script
-def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_root_obs, goal_pos):
-    # type: (Tensor, Tensor, Tensor, Tensor, bool, Tensor) -> Tensor
+def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_root_obs):
+    # type: (Tensor, Tensor, Tensor, Tensor, bool) -> Tensor
     root_pos = root_states[:, 0:3]
     root_rot = root_states[:, 3:7]
     root_vel = root_states[:, 7:10]
@@ -1070,23 +1078,18 @@ def compute_a1_observations(root_states, dof_pos, dof_vel, key_body_pos, local_r
     local_key_body_pos = key_body_pos - root_pos_expand
 
     heading_rot_expand = heading_rot.unsqueeze(-2)
-    heading_rot_expand_for_key_body = heading_rot_expand.repeat((1, local_key_body_pos.shape[1], 1))
+    heading_rot_expand = heading_rot_expand.repeat((1, local_key_body_pos.shape[1], 1))
     flat_end_pos = local_key_body_pos.view(local_key_body_pos.shape[0] * local_key_body_pos.shape[1],
                                            local_key_body_pos.shape[2])
-    flat_heading_rot = heading_rot_expand_for_key_body.view(heading_rot_expand_for_key_body.shape[0] * heading_rot_expand_for_key_body.shape[1],
-                                               heading_rot_expand_for_key_body.shape[2])
+    flat_heading_rot = heading_rot_expand.view(heading_rot_expand.shape[0] * heading_rot_expand.shape[1],
+                                               heading_rot_expand.shape[2])
     local_end_pos = my_quat_rotate(flat_heading_rot, flat_end_pos)
     flat_local_key_pos = local_end_pos.view(local_key_body_pos.shape[0],
                                             local_key_body_pos.shape[1] * local_key_body_pos.shape[2])
 
-    local_goal_pos = goal_pos - root_pos
-    local_target_pos = my_quat_rotate(heading_rot, local_goal_pos)
-    flat_local_goal_xy = local_target_pos[:, :2]
-
     dof_obs = dof_to_obs(dof_pos)
 
-    obs = torch.cat((root_h, root_rot_obs, local_root_vel, local_root_ang_vel, dof_obs, dof_vel, flat_local_key_pos,
-                     flat_local_goal_xy),
+    obs = torch.cat((root_h, root_rot_obs, local_root_vel, local_root_ang_vel, dof_obs, dof_vel, flat_local_key_pos),
                     dim=-1)
     return obs
 
@@ -1098,14 +1101,9 @@ def compute_local_root_quat(root_rot):
 
 
 @torch.jit.script
-def compute_a1_reward(root_xy, goal_xy):
-    # type: (Tensor, Tensor) -> Tensor
-    # without task reward
-    # reward = torch.ones_like(obs_buf[:, 0])
-
-    x_diff = root_xy[:, 0] - goal_xy[:, 0]
-    y_diff = root_xy[:, 1] - goal_xy[:, 1]
-    reward = torch.exp(- x_diff * x_diff * 0.5 - y_diff * y_diff / 0.5)
+def compute_a1_reward(obs_buf):
+    # type: (Tensor) -> Tensor
+    reward = torch.ones_like(obs_buf[:, 0])
     return reward
 
 

@@ -1,22 +1,24 @@
 # used to create the object
-name: A1AMP
+name: A1Dribbling
 
 physics_engine: ${..physics_engine}
+
+rl_device: ${..rl_device}
 
 # if given, will override the device setting in gym.
 env:
   priv_obs: false
-  historySteps:
+  historySteps: 8
   numEnvs: ${resolve_default:4096,${...num_envs}}
   envSpacing: 3
-  episodeLength: 300
+  episodeLength: 2000
   cameraFollow: True # if the camera follows humanoid or not
   enableDebugVis: False
   
   pdControl: True
   powerScale: 1.0
   controlFrequencyInv: 30 # 33 Hz
-  stateInit: "Random"  # Random
+  stateInit: "Hybrid"  # Random
   hybridInitProb: 0.5
   numAMPObsSteps: 5
 
@@ -30,14 +32,6 @@ env:
 #  motion_file: "a1_ig_ofstv1_pace.json"
 #  motion_file: "a1_ig_ofstv1_trot2.json"
 
-  # these motions should use hyperparameters from HumanoidAMPPPO.yaml
-  #motion_file: "amp_humanoid_run.npy"
-  #motion_file: "amp_humanoid_dance.npy"
-
-  # these motions should use hyperparameters from HumanoidAMPPPOLowGP.yaml
-  #motion_file: "amp_humanoid_hop.npy"
-  #motion_file: "amp_humanoid_backflip.npy"
-
   asset:
     assetFileName: "urdf/a1_ig.urdf"
     ballAsset: "urdf/soccerball.urdf"
@@ -47,6 +41,8 @@ env:
     staticFriction: 1.0
     dynamicFriction: 1.0
     restitution: 0.0
+    limit_space: false
+    ball_dist: 2.5
 
 control:
   control_type: 'P'
@@ -87,12 +83,12 @@ sim:
     use_gpu: ${contains:"cuda",${....sim_device}} # set to False to run on CPU
     num_position_iterations: 4
     num_velocity_iterations: 0
-    contact_offset: 0.02
+    contact_offset: 0.01 # 0.02 -> 0.01
     rest_offset: 0.0
-    bounce_threshold_velocity: 0.2
-    max_depenetration_velocity: 10.0
+    bounce_threshold_velocity: 0.5 # 0.2 -> 0.5
+    max_depenetration_velocity: 1.0
     default_buffer_size_multiplier: 5.0
-    max_gpu_contact_pairs: 8388608 # 8*1024*1024
+    max_gpu_contact_pairs: 8388608 # 8*1024*1024 --> 46
     num_subscenes: ${....num_subscenes}
     contact_collection: 2 # 0: CC_NEVER (don't collect contact info), 1: CC_LAST_SUBSTEP (collect only contacts on last substep), 2: CC_ALL_SUBSTEPS (default - all contacts)
 
@@ -171,30 +167,47 @@ task:
 
   domain_rand:
     randomize_friction: False
-    friction_range: [0.05, 5.0]
+    friction_range: [0., 2.5]
     randomize_joint_friction: False
     joint_friction_std: 0.01
-    randomize_base_mass: True
+    randomize_base_mass: False
     mass_ratio_range: 0.5
     inertia_ratio_range: 0.2
-    randomize_PD: True
-    push_robots: True
+    randomize_PD: False
+    randomize_initial_dof_pos: False
+    push_robots: False
     push_interval_s: 0.2
     push_ball: False
 
   noise:
-    add_noise: True
-    add_delay: True
+    add_noise: False
+    add_delay: False
     noise_level: 1.0 # scales other values
     delay_bound: [0.0004, 0.025] #40
     add_ball_delay: False
     noise_scales:
       base_quat: 0.01
       dof_pos: 0.01
-      dof_vel: 0.05
-      ball_pos: 0.01
+      dof_vel: 0.01
+      ball_pos: 0.03
       gravity: 0.05
       height_measurements: 0.1
 
-  action_filter: False
+  action_filter: True
+  reward:
+    actor_vel_scale: 1.5
+    ball_vel_scale: 2.0
+    energy_scale: 0.001
+    energy_weight: 0.01
+    ab_dist_threshold: 0.5
+    piecewise: True
+  goal_reset_freq_inv: 4
+  goal_reset_freq_inv_upper: 2
+  is_additive: True
+  randomize_goal: True
+  randomize_obj: True
+  obj_size_range: 'soccerball_urdfs'
+  obj_density_range: [80, 200]
+  ball_size: 0.1
+  
 

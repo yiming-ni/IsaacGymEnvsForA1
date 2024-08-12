@@ -368,5 +368,29 @@ def calc_heading_quat_inv(q):
     heading_q = quat_from_angle_axis(-heading, axis)
     return heading_q
 
+@torch.jit.script
+def tolerance(x, lower, upper, margin=0.0, sigmoid='linear', value_at_margin=0):
+    # type: (Tensor, float, float, float, str, float) -> Tensor
+    if lower > upper:
+        raise ValueError('Lower bound must be <= upper bound.')
+    if margin < 0:
+        raise ValueError('`margin` must be non-negative.')
+    in_bounds = torch.logical_and(lower <= x, x <= upper)
+    if margin == 0:
+        return torch.where(in_bounds, torch.ones_like(x), torch.zeros_like(x))
+    else:
+        d = torch.where(x < lower, lower - x, x - upper) / margin
+        # import ipdb; ipdb.set_trace()
+        if sigmoid == 'linear':
+            scale = torch.ones_like(x) - value_at_margin
+            scaled_x = d*scale
+            return torch.where(torch.abs(scaled_x) < 1, 1 - scaled_x, torch.zeros_like(scaled_x))
+        else:
+            if value_at_margin == 0:
+                raise ValueError('value at margin cannot be 0 for gaussian simoid.')
+            scale = torch.sqrt(-2 * torch.log(value_at_margin * torch.ones_like(d)))
+            sig = torch.exp(-0.5 * (d*scale)**2)
+            # ipdb.set_trace()
+            return torch.where(in_bounds, torch.ones_like(sig), sig)
 
 # EOF

@@ -50,6 +50,15 @@ import isaacgymenvs.learning.amp_datasets as amp_datasets
 
 from tensorboardX import SummaryWriter
 
+REWARD_TERMS = [
+    "actor_dist/static_rew",
+    "actor_move_rew",
+    "ball_dist/static_rew",
+    "ball_move_rew",
+    "total_rew",
+    "energy_rew"
+    ]
+
 
 class CommonAgent(a2c_continuous.A2CAgent):
     def __init__(self, base_name, config):
@@ -100,7 +109,10 @@ class CommonAgent(a2c_continuous.A2CAgent):
         self.use_experimental_cv = self.config.get('use_experimental_cv', True)
         self.dataset = amp_datasets.AMPDataset(self.batch_size, self.minibatch_size, self.is_discrete, self.is_rnn, self.ppo_device, self.seq_len)
         self.algo_observer.after_init(self)
-        
+        self.reward_as_dict = self.config.get('reward_as_dict', False)
+        if self.reward_as_dict:
+            self.game_rewards_dict = {x: torch_ext.AverageMeter(self.value_size, self.games_to_track).to(self.ppo_device) for x in REWARD_TERMS}
+
         return
 
     def init_tensors(self):
@@ -109,6 +121,8 @@ class CommonAgent(a2c_continuous.A2CAgent):
         self.experience_buffer.tensor_dict['next_values'] = torch.zeros_like(self.experience_buffer.tensor_dict['values'])
 
         self.tensor_list += ['next_obses']
+        if self.reward_as_dict:
+            self.current_reward_dict = {x: torch.zeros_like(self.current_rewards) for x in REWARD_TERMS}
         return
 
     def train(self):
@@ -158,6 +172,14 @@ class CommonAgent(a2c_continuous.A2CAgent):
                 if self.game_rewards.current_size > 0:
                     mean_rewards = self.game_rewards.get_mean()
                     mean_lengths = self.game_lengths.get_mean()
+
+                    if self.reward_as_dict:
+                        mean_rewards_dict = {x: self.game_rewards_dict[x].get_mean() for x in REWARD_TERMS}
+                        for i in range(self.value_size):
+                            for x in REWARD_TERMS:
+                                self.writer.add_scalar(('rewards/'+x).format(i), mean_rewards_dict[x][i], frame)
+
+
 
                     for i in range(self.value_size):
                         self.writer.add_scalar('rewards/frame'.format(i), mean_rewards[i], frame)
@@ -302,6 +324,12 @@ class CommonAgent(a2c_continuous.A2CAgent):
 
             self.current_rewards = self.current_rewards * not_dones.unsqueeze(1)
             self.current_lengths = self.current_lengths * not_dones
+
+            if self.reward_as_dict:
+                for x in REWARD_TERMS:
+                    self.current_reward_dict[x] += infos[x].unsqueeze(1)
+                    self.game_rewards_dict[x].update(self.current_reward_dict[x][done_indices])
+                    self.current_reward_dict[x] = self.current_reward_dict[x] * not_dones.unsqueeze(1)
 
         mb_fdones = self.experience_buffer.tensor_dict['dones'].float()
         mb_values = self.experience_buffer.tensor_dict['values']
@@ -470,7 +498,6 @@ class CommonAgent(a2c_continuous.A2CAgent):
         obs = obs_dict['obs']
         processed_obs = self._preproc_obs(obs)
         value = self.model.a2c_network.eval_critic(processed_obs)  # TODO: Change back to this line and delete the next
-        # value = torch.zeros_like(obs[..., 0:1])
         if self.normalize_value:
             value = self.value_mean_std(value, True)
         return value
